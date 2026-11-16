@@ -1,0 +1,10 @@
+{
+  "//": "Tickers que o cadastro FCA da CVM traz errados ou em branco. ticker -> CNPJ (e ações por unit).",
+  "CSNA3": { "cnpj": "33.042.730/0001-04" },
+  "CMIN3": { "cnpj": "08.902.291/0001-15" },
+  "MBRF3": { "cnpj": "03.853.896/0001-40" },
+  "BPAC3": { "cnpj": "30.306.294/0001-45" },
+  "BPAC5": { "cnpj": "30.306.294/0001-45" },
+  "BPAC11": { "cnpj": "30.306.294/0001-45", "unitShares": 3 },
+  "OBTC3": { "cnpj": "59.693.110/0001-29" }
+}
