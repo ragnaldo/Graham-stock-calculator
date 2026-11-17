@@ -4,8 +4,10 @@ on:
   push:
     branches: [claude/lucid-babbage-5ji5cf]
   schedule:
-    # dias úteis às 20:37 (Brasília), depois do pregão: coleta indicadores atuais e republica
+    # dias úteis às 20:37 (Brasília), depois do pregão: coleta fundamentos e republica
     - cron: "37 23 * * 1-5"
+    # dias úteis às 12:47 (Brasília): pega balanços trimestrais publicados de manhã
+    - cron: "47 15 * * 1-5"
   workflow_dispatch:
 
 concurrency:
@@ -28,6 +30,10 @@ jobs:
 
       - run: npm ci
 
+      - name: Coletar balanços (CVM) e preços históricos (B3)
+        # anos recentes, inclusive trimestres (ITR); os anteriores vêm de data/ no repositório
+        run: npm run data:update || echo "::warning::CVM ou B3 indisponível; usando a base histórica do repositório"
+
       - name: Coletar cotações e indicadores (Fundamentus)
         # se a fonte falhar, o site sai com a última coleta salva no repositório
         run: npm run data:quotes || echo "::warning::Fundamentus indisponível; usando data/snapshot.json do repositório"
@@ -39,6 +45,7 @@ jobs:
           npm run build
           mkdir -p _site
           cp dist/calculadora-graham.html _site/index.html
+          cp dist/data.json _site/data.json
           touch _site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3

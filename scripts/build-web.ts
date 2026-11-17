@@ -10,13 +10,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { build } from "esbuild";
 import type { Company, PriceSeries, WebDataset } from "../src/core/dataset";
-import type { AnnualRaw } from "../src/core/history";
+import type { AnnualRaw, QuarterRaw } from "../src/core/history";
 import type { SnapshotFile } from "./update-quotes";
 
 const ROOT = path.resolve(__dirname, "..");
 const DATA = path.join(ROOT, "data");
 const OUT = path.join(ROOT, "dist");
 const TITLE = "Calculadora Graham B3";
+/** Endereço da base publicada que o botão Atualizar baixa (GitHub Pages; aceita leitura de qualquer origem). */
+const DATA_URL = process.env.DATA_URL ?? "https://ragnaldo.github.io/Graham-stock-calculator/data.json";
 
 const read = <T>(file: string): T => {
   const p = path.join(DATA, file);
@@ -29,6 +31,7 @@ function dataset(): WebDataset {
   const companies = read<Company[]>("companies.json");
   const annual = read<Record<string, AnnualRaw[]>>("annual.json");
   const prices = read<Record<string, PriceSeries>>("prices.json");
+  const quarters = read<Record<string, QuarterRaw[]>>("quarters.json");
   const meta = read<{ updatedAt?: string; lastFiscalYear?: number }>("meta.json");
 
   // só o que a interface usa: papéis da lista e empresas com algum desses papéis
@@ -42,13 +45,22 @@ function dataset(): WebDataset {
     if (!listed.has(t)) continue;
     usedPrices[t] = { m: Object.fromEntries(Object.entries(s.m).map(([k, v]) => [k, Number(v.toPrecision(6))])), last: s.last, ...(s.splits ? { splits: s.splits } : {}) };
   }
+  // trimestre mais recente com balanço publicado pela maioria das empresas
+  const ends = new Map<string, number>();
+  for (const rows of Object.values(quarters)) {
+    const d = rows[rows.length - 1]?.d;
+    if (d) ends.set(d, (ends.get(d) ?? 0) + 1);
+  }
+  const lastQuarter = [...ends.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   return {
     quotesAt: snap.quotesAt,
+    lastQuarter,
     historyAt: meta.updatedAt ?? null,
     lastFiscalYear: meta.lastFiscalYear ?? null,
     snapshots: snap.snapshots,
     companies: usedCompanies,
     annual: Object.fromEntries(Object.entries(annual).filter(([c]) => cnpjs.has(c))),
+    quarters: Object.fromEntries(Object.entries(quarters).filter(([c]) => cnpjs.has(c))),
     prices: usedPrices,
     extras: snap.extras,
   };
@@ -71,7 +83,7 @@ async function main() {
     jsx: "automatic",
     write: false,
     legalComments: "none",
-    define: { "process.env.NODE_ENV": '"production"' },
+    define: { "process.env.NODE_ENV": '"production"', __DATA_URL__: JSON.stringify(DATA_URL) },
     alias: { "@": path.join(ROOT, "src") },
     logLevel: "warning",
   });
@@ -108,6 +120,8 @@ ${body}
 `;
   writeFileSync(path.join(OUT, "calculadora-graham.html"), full);
   writeFileSync(path.join(OUT, "artifact.html"), body + "\n");
+  // base publicada junto com o site, lida pelo botão Atualizar
+  writeFileSync(path.join(OUT, "data.json"), data);
   const mb = (n: number) => `${(n / 1024 / 1024).toFixed(2)} MB`;
   console.log(`dist/calculadora-graham.html  ${mb(Buffer.byteLength(full))}  (código ${mb(code.length)}, estilos ${mb(css.length)}, dados ${mb(data.length)})`);
 }

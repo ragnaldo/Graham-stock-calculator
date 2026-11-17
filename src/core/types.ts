@@ -63,6 +63,8 @@ export interface StocksPayload {
 // ---------- detalhe ----------
 export interface AnnualPoint {
   year: number;
+  /** Rótulo quando não é um exercício fechado (ex.: "12M até 3T26"). */
+  label?: string;
   consolidated: boolean;
   revenue: number | null;
   ebit: number | null;
@@ -120,9 +122,31 @@ export interface StockDetail {
   /** Rótulo -> valor bruto da página de detalhes (balanço e resultado). */
   fundamentals: { label: string; value: number | null; unit: "brl" | "pct" | "x" | "n" }[];
   annual: AnnualPoint[];
+  /** Últimos 12 meses (4 trimestres mais recentes), quando disponível. */
+  ttm: AnnualPoint | null;
+  quarters: QuarterPoint[];
   prices: { month: string; close: number }[];
   dividends: DividendEvent[];
   dividendsByYear: { year: number; value: number }[];
   splits: { date: string; factor: number }[];
   warnings: string[];
+}
+
+/** Resultado de um trimestre (3 meses) e balanço no fim dele. Valores em R$ mil, por ação em R$. */
+export interface QuarterPoint {
+  date: string;
+  /** "3T26" */
+  label: string;
+  revenue: number | null;
+  ebit: number | null;
+  netIncome: number | null;
+  netMargin: number | null;
+  lpa: number | null;
+  dividendsPaid: number | null;
+  equity: number | null;
+  grossDebt: number | null;
+  debtToEquity: number | null;
+  currentRatio: number | null;
+  /** Variação do lucro sobre o mesmo trimestre do ano anterior. */
+  netIncomeYoY: number | null;
 }

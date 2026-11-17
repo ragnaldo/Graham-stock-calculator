@@ -34,6 +34,14 @@ const ds: WebDataset = {
   snapshots: [snap],
   companies: [{ cnpj: "1", name: "Teste S.A.", sector: "Teste", financial: false, tickers: { TEST4: { kind: "PN" } } }],
   annual: { "1": [{ y: 2025, con: true, ni: 100_000, eq: 1_000_000, sh: 100_000_000 }] },
+  quarters: {
+    "1": [
+      { d: "2025-12-31", con: true, rev: 400_000, ni: 25_000, div: 10_000, eq: 1_000_000, sh: 100_000_000 },
+      { d: "2026-03-31", con: true, rev: 450_000, ni: 30_000, div: 0, eq: 1_010_000, sh: 100_000_000 },
+      { d: "2026-06-30", con: true, rev: 480_000, ni: 35_000, div: 5_000, eq: 1_030_000, sh: 100_000_000 },
+      { d: "2026-09-30", con: true, rev: 500_000, ni: 40_000, div: 5_000, eq: 1_050_000, debtS: 50_000, debtL: 160_000, sh: 100_000_000 },
+    ],
+  },
   prices: { TEST4: { m: { "2025-06": 10, "2025-12": 12 }, last: "20251230", splits: [["2025-09-01", 2]] } },
   extras: {
     TEST4: {
@@ -73,6 +81,29 @@ describe("base embutida", () => {
     expect(d.prices.map((p) => p.close)).toEqual([5, 12]);
     expect(d.annual[0].dps).toBe(1);
     expect(d.warnings).toEqual([]);
+  });
+
+  it("soma os 4 últimos trimestres nos 12 meses, a preço atual", () => {
+    const td = indexDataset(ds);
+    const d = buildDetail(toRow(snap, td("TEST4")), ds.extras.TEST4, td("TEST4"), "2026-10-31");
+    const t = d.ttm!;
+    expect(t.label).toBe("12M até 3T26");
+    expect(t.netIncome).toBe(130_000);
+    expect(t.revenue).toBe(1_830_000);
+    expect(t.lpa).toBeCloseTo(1.3); // 130 mi / 100 mi ações
+    expect(t.pl).toBeCloseTo(20 / 1.3);
+    expect(t.equity).toBe(1_050_000);
+    expect(t.grossDebt).toBe(210_000);
+    expect(t.dps).toBeCloseTo(0.5); // proventos com data com nos últimos 12 meses
+    expect(t.dy).toBeCloseTo(0.5 / 20);
+    expect(d.quarters.map((q) => q.label)).toEqual(["4T25", "1T26", "2T26", "3T26"]);
+    expect(d.quarters[3].lpa).toBeCloseTo(0.4);
+  });
+
+  it("não monta 12 meses com trimestres faltando", () => {
+    const gap = { ...ds, quarters: { "1": ds.quarters["1"].filter((q) => q.d !== "2026-03-31") } };
+    const td = indexDataset(gap);
+    expect(buildDetail(toRow(snap, td("TEST4")), null, td("TEST4")).ttm).toBeNull();
   });
 
   it("avisa quando falta cadastro ou detalhes", () => {

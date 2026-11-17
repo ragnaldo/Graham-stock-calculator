@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { fmtCompact, fmtDateTime, fmtMultiple, fmtPct, fmtPrice } from "@/core/format";
 import { getStrategy, screen, type Evaluated, type ScreenConfig } from "@/core/strategies";
+import { quarterLabel } from "@/core/history";
 import { useConfig } from "@/lib/useConfig";
-import { getStocks, refreshQuotes } from "@/web/data";
+import { getStocks, refreshAll } from "@/web/data";
 import { StrategyPanel } from "./StrategyPanel";
 import { Button, Margin, Spinner, VerdictIcon } from "./ui";
 
@@ -67,6 +68,7 @@ export function Screener() {
   const [data, setData] = useState<Payload>(getStocks);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("");
@@ -77,10 +79,12 @@ export function Screener() {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setWarning(null);
     try {
-      const next = await refreshQuotes();
-      setData(next);
-      setNotice(`Cotações de ${next.updated} papéis atualizadas. P/L, P/VP, DY e margens recalculados com o preço atual.`);
+      const r = await refreshAll();
+      setData(getStocks());
+      setNotice(r.message);
+      setWarning(r.warning);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -121,15 +125,15 @@ export function Screener() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Calculadora Graham · B3</h1>
           <p className="mt-0.5 text-sm text-ink-2">
-            {data.live ? `Cotações ao vivo de ${fmtDateTime(data.updatedAt)} · indicadores de ${fmtDateTime(data.baseAt)}` : `Cotações e indicadores de ${fmtDateTime(data.updatedAt)}`}
-            {data.dataset.lastYear ? ` · balanços anuais até ${data.dataset.lastYear}` : ""}
+            {data.live ? `Cotações ao vivo de ${fmtDateTime(data.updatedAt)} · fundamentos de ${fmtDateTime(data.baseAt)}` : `Cotações e fundamentos de ${fmtDateTime(data.updatedAt)}`}
+            {data.lastQuarter ? ` · balanços até ${quarterLabel(data.lastQuarter)}` : data.dataset.lastYear ? ` · balanços até ${data.dataset.lastYear}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="lg:hidden">
             <Button onClick={() => setPanelOpen((v) => !v)}>{panelOpen ? "Fechar filtros" : `Estratégias (${config.active.length})`}</Button>
           </span>
-          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca as cotações atuais e recalcula os indicadores">
+          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca os fundamentos mais recentes publicados e as cotações do momento">
             {busy ? <Spinner /> : <span aria-hidden>↻</span>}
             Atualizar
           </Button>
@@ -139,6 +143,11 @@ export function Screener() {
       {error && (
         <p role="alert" className="mb-4 rounded-lg border border-bad/40 bg-bad-soft px-4 py-3 text-sm text-bad">
           Não foi possível atualizar: {error}
+        </p>
+      )}
+      {warning && (
+        <p role="status" className="mb-4 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn">
+          {warning}
         </p>
       )}
       {notice && (

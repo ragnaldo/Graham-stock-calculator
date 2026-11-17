@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustPrices, buildAnnual, splitFactorAfter, summarize, type AnnualRaw, type Split } from "./history";
+import { adjustPrices, buildAnnual, buildQuarters, splitFactorAfter, summarize, type AnnualRaw, type Split } from "./history";
 
 // desdobramento 1:2 em 2021: ações dobram, preço cai pela metade
 const rows: AnnualRaw[] = [
@@ -44,5 +44,15 @@ describe("ajuste por desdobramentos", () => {
     expect(h.years).toEqual([2020, 2021]);
     expect(h.shares).toEqual([200_000_000, 200_000_000]);
     expect(h.balance?.year).toBe(2021);
+  });
+
+  it("troca a quantidade de ações do trimestre quando destoa da atual", () => {
+    const q = (sh: number) => ({ d: "2026-09-30", con: true, ni: 10_000, sh });
+    // informada em milhares: vale a atual
+    expect(buildQuarters([q(100_000)], [], 1, 100_000_000)[0].lpa).toBeCloseTo(0.1);
+    // recompra pequena: mantém a do trimestre
+    expect(buildQuarters([q(95_000_000)], [], 1, 100_000_000)[0].lpa).toBeCloseTo(10_000_000 / 95_000_000);
+    // sem quantidade atual: usa a do trimestre
+    expect(buildQuarters([q(50_000_000)], [], 1, null)[0].lpa).toBeCloseTo(0.2);
   });
 });

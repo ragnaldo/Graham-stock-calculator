@@ -159,6 +159,87 @@ interface Raw {
   divs: [string, number][];
 }
 
+/** Lê uma linha de demonstração (BPA, BPP, DRE ou DFC) para os campos que usamos. Valores em R$ mil. */
+function applyAccount(stmt: string, col: (name: string) => string, r: Raw) {
+    const code = col("CD_CONTA");
+    const ds = norm(col("DS_CONTA"));
+    const scale = col("ESCALA_MOEDA") === "UNIDADE" ? 0.001 : 1; // normaliza p/ R$ mil
+    const val = num(col("VL_CONTA")) * scale;
+    if (!Number.isFinite(val)) return;
+    const depth = code.split(".").length;
+
+    if (stmt === "BPA") {
+      if (code === "1") r.v.assets = val;
+      else if (code === "1.01" && ds.startsWith("ativo circulante")) r.v.ca = val;
+      else if (depth === 3 && code.startsWith("1.01.") && (ds.startsWith("caixa e equivalentes") || ds.startsWith("aplicacoes financeiras")))
+        r.v.cash = (r.v.cash ?? 0) + val;
+    } else if (stmt === "BPP") {
+      if (code === "2.01" && ds.startsWith("passivo circulante")) r.v.cl = val;
+      else if (code === "2.02" && ds.startsWith("passivo nao circulante")) r.v.ncl = val;
+      else if (code === "2.01.04" && ds.startsWith("emprestimos e financiamentos")) r.v.debtS = val;
+      else if (code === "2.02.01" && ds.startsWith("emprestimos e financiamentos")) r.v.debtL = val;
+      else if (depth === 2 && /^patrimonio liquido( consolidado)?$/.test(ds)) r.v.eqTotal = val;
+      else if (depth === 3 && ds.startsWith("participacao dos acionistas nao controladores")) r.v.minority = val;
+    } else if (stmt === "DRE") {
+      if (code === "3.01") r.v.rev = val;
+      else if (depth === 2 && ds.startsWith("resultado antes do resultado financeiro e dos tributos")) r.v.ebit = val;
+      else if (depth === 2 && /^lucro(\/| ou )prejuizo (consolidado )?do periodo$/.test(ds)) {
+        r.v.niTotal = val;
+        r.niCode = code;
+      } else if (depth === 3 && r.niCode && code.startsWith(r.niCode + ".") && ds.startsWith("atribuido a socios da empresa controladora"))
+        r.v.niCtrl = val;
+    } else if (stmt === "DFC") {
+      if (
+        code.startsWith("6.03.") &&
+        val < 0 &&
+        /dividend|juros s(obre|\/|\.)? ?(o )?capital|jcp|jscp|proventos/.test(ds) &&
+        !/nao controlador|nao-controlador|minorit|recebid|a pagar/.test(ds)
+      )
+        r.divs.push([code, -val]);
+    }
+}
+
+/** Campos de resultado (DRE e DFC) de um bloco já lido. */
+function flowsOf(r: Raw, isCon: boolean) {
+  const v = r.v;
+  // evita dupla contagem pai/filho nas linhas de dividendos
+  const leaf = r.divs.filter(([c]) => !r.divs.some(([o]) => o !== c && o.startsWith(c + ".")));
+  return {
+    rev: v.rev,
+    ebit: v.ebit,
+    // algumas empresas preenchem com zero a linha dos controladores: vale o lucro total
+    ni: isCon && v.niCtrl !== undefined && (v.niCtrl !== 0 || !v.niTotal) ? v.niCtrl : v.niTotal,
+    niTotal: v.niTotal,
+    div: leaf.reduce((s, [, x]) => s + x, 0),
+  };
+}
+
+/** Campos de balanço (BPA e BPP) de um bloco já lido. */
+function balanceOf(r: Raw, isCon: boolean) {
+  const v = r.v;
+  return {
+    eq: v.eqTotal !== undefined ? v.eqTotal - (isCon ? (v.minority ?? 0) : 0) : undefined,
+    assets: v.assets,
+    ca: v.ca,
+    cl: v.cl,
+    ncl: v.ncl,
+    debtS: v.debtS,
+    debtL: v.debtL,
+    cash: v.cash,
+  };
+}
+
+/** Remove campos vazios e arredonda valores em R$ mil. */
+function clean<T extends object>(row: T): T {
+  const o = row as Record<string, unknown>;
+  for (const k of Object.keys(o)) {
+    const x = o[k];
+    if (x === undefined || (typeof x === "number" && !Number.isFinite(x))) delete o[k];
+    else if (typeof x === "number" && !["y", "sh", "shTreas"].includes(k)) o[k] = Math.round(x);
+  }
+  return row;
+}
+
 async function parseDfp(zipPath: string, year: number, out: Record<string, AnnualRow[]>) {
   const raw: Record<Scope, Map<string, Raw>> = { con: new Map(), ind: new Map() };
   const shares = new Map<string, { version: number; dt: string; sh: number; treas: number }>();
@@ -197,42 +278,7 @@ async function parseDfp(zipPath: string, year: number, out: Record<string, Annua
     const scope = m[2] as Scope;
     const r = get(scope, col("CNPJ_CIA"), col("DT_REFER"), num(col("VERSAO")));
     if (!r) return;
-    const code = col("CD_CONTA");
-    const ds = norm(col("DS_CONTA"));
-    const scale = col("ESCALA_MOEDA") === "UNIDADE" ? 0.001 : 1; // normaliza p/ R$ mil
-    const val = num(col("VL_CONTA")) * scale;
-    if (!Number.isFinite(val)) return;
-    const depth = code.split(".").length;
-
-    if (stmt === "BPA") {
-      if (code === "1") r.v.assets = val;
-      else if (code === "1.01" && ds.startsWith("ativo circulante")) r.v.ca = val;
-      else if (depth === 3 && code.startsWith("1.01.") && (ds.startsWith("caixa e equivalentes") || ds.startsWith("aplicacoes financeiras")))
-        r.v.cash = (r.v.cash ?? 0) + val;
-    } else if (stmt === "BPP") {
-      if (code === "2.01" && ds.startsWith("passivo circulante")) r.v.cl = val;
-      else if (code === "2.02" && ds.startsWith("passivo nao circulante")) r.v.ncl = val;
-      else if (code === "2.01.04" && ds.startsWith("emprestimos e financiamentos")) r.v.debtS = val;
-      else if (code === "2.02.01" && ds.startsWith("emprestimos e financiamentos")) r.v.debtL = val;
-      else if (depth === 2 && /^patrimonio liquido( consolidado)?$/.test(ds)) r.v.eqTotal = val;
-      else if (depth === 3 && ds.startsWith("participacao dos acionistas nao controladores")) r.v.minority = val;
-    } else if (stmt === "DRE") {
-      if (code === "3.01") r.v.rev = val;
-      else if (depth === 2 && ds.startsWith("resultado antes do resultado financeiro e dos tributos")) r.v.ebit = val;
-      else if (depth === 2 && /^lucro(\/| ou )prejuizo (consolidado )?do periodo$/.test(ds)) {
-        r.v.niTotal = val;
-        r.niCode = code;
-      } else if (depth === 3 && r.niCode && code.startsWith(r.niCode + ".") && ds.startsWith("atribuido a socios da empresa controladora"))
-        r.v.niCtrl = val;
-    } else if (stmt === "DFC") {
-      if (
-        code.startsWith("6.03.") &&
-        val < 0 &&
-        /dividend|juros s(obre|\/|\.)? ?(o )?capital|jcp|jscp|proventos/.test(ds) &&
-        !/nao controlador|nao-controlador|minorit|recebid|a pagar/.test(ds)
-      )
-        r.divs.push([code, -val]);
-    }
+    applyAccount(stmt, col, r);
   });
 
   await eachZipLine(zipPath, (n) => /_(BPA|BPP|DRE|DFC_M[DI])_(con|ind)_|composicao_capital/.test(n), reader);
@@ -244,44 +290,160 @@ async function parseDfp(zipPath: string, year: number, out: Record<string, Annua
     // consolidado só vale se trouxer o resultado; senão usa o individual
     const r = con && con.v.niTotal !== undefined && con.v.eqTotal !== undefined ? con : (ind ?? con)!;
     const isCon = r === con;
-    const v = r.v;
-    // evita dupla contagem pai/filho nas linhas de dividendos
-    const leaf = r.divs.filter(([c]) => !r.divs.some(([o]) => o !== c && o.startsWith(c + ".")));
-    const div = leaf.reduce((s, [, x]) => s + x, 0);
-    const row: AnnualRow = {
-      y: Number(r.dt.slice(0, 4)),
-      con: isCon,
-      rev: v.rev,
-      ebit: v.ebit,
-      // algumas empresas preenchem com zero a linha dos controladores: vale o lucro total
-      ni: isCon && v.niCtrl !== undefined && (v.niCtrl !== 0 || !v.niTotal) ? v.niCtrl : v.niTotal,
-      niTotal: v.niTotal,
-      eq: v.eqTotal !== undefined ? v.eqTotal - (isCon ? (v.minority ?? 0) : 0) : undefined,
-      assets: v.assets,
-      ca: v.ca,
-      cl: v.cl,
-      ncl: v.ncl,
-      debtS: v.debtS,
-      debtL: v.debtL,
-      cash: v.cash,
-      div: leaf.length ? div : 0,
-    };
+    const row: AnnualRow = { y: Number(r.dt.slice(0, 4)), con: isCon, ...flowsOf(r, isCon), ...balanceOf(r, isCon) };
     const s = shares.get(cnpj);
     if (s && s.dt === r.dt && s.sh > 0) {
       row.sh = s.sh;
       row.shTreas = s.treas;
     }
-    for (const k of Object.keys(row) as (keyof AnnualRow)[]) {
-      const x = row[k];
-      if (x === undefined || (typeof x === "number" && !Number.isFinite(x))) delete row[k];
-      else if (typeof x === "number" && k !== "y" && k !== "sh" && k !== "shTreas") (row[k] as number) = Math.round(x);
-    }
+    clean(row);
     if (row.y !== year && row.y !== year - 1) continue; // exercício fora do arquivo
     const list = (out[cnpj] ??= []);
     const i = list.findIndex((a) => a.y === row.y);
     if (i >= 0) list[i] = { ...row, sh: row.sh ?? list[i].sh, shTreas: row.shTreas ?? list[i].shTreas };
     else list.push(row);
   }
+}
+
+// ---------- ITR: trimestres ----------
+/** Trimestre: resultado dos 3 meses, balanço no fim do trimestre. Valores em R$ mil. */
+export interface QuarterRow {
+  d: string; // fim do trimestre, YYYY-MM-DD
+  con: boolean;
+  rev?: number;
+  ebit?: number;
+  ni?: number;
+  div?: number;
+  eq?: number;
+  assets?: number;
+  ca?: number;
+  cl?: number;
+  ncl?: number;
+  debtS?: number;
+  debtL?: number;
+  cash?: number;
+  sh?: number;
+  shTreas?: number;
+}
+type Flows = ReturnType<typeof flowsOf>;
+interface QuarterRaw {
+  row: QuarterRow;
+  ytd: Flows;
+}
+
+const monthsBetween = (ini: string, fim: string) =>
+  (Number(fim.slice(0, 4)) - Number(ini.slice(0, 4))) * 12 + Number(fim.slice(5, 7)) - Number(ini.slice(5, 7)) + 1;
+
+async function parseItr(zipPath: string, out: Map<string, Map<string, QuarterRaw>>) {
+  // por escopo, empresa e trimestre: balanço, resultado do trimestre e acumulado no ano
+  type Blocks = { version: number; bal: Raw; q: Raw; ytd: Raw };
+  const raw: Record<Scope, Map<string, Blocks>> = { con: new Map(), ind: new Map() };
+  const shares = new Map<string, { version: number; sh: number; treas: number }>();
+  const blank = (): Raw => ({ version: 0, dt: "", v: {}, divs: [] });
+
+  const reader = csvReader((entry, col) => {
+    const cnpj = col("CNPJ_CIA");
+    const dt = col("DT_REFER");
+    const version = num(col("VERSAO"));
+    if (entry.includes("composicao_capital")) {
+      const key = `${cnpj}|${dt}`;
+      const cur = shares.get(key);
+      if (!cur || version >= cur.version)
+        shares.set(key, { version, sh: num(col("QT_ACAO_TOTAL_CAP_INTEGR")), treas: num(col("QT_ACAO_TOTAL_TESOURO")) || 0 });
+      return;
+    }
+    if (col("ORDEM_EXERC") !== "ÚLTIMO") return;
+    const m = /_(BPA|BPP|DRE|DFC_M[DI])_(con|ind)_/.exec(entry);
+    if (!m) return;
+    const stmt = m[1].slice(0, 3);
+    const map = raw[m[2] as Scope];
+    const key = `${cnpj}|${dt}`;
+    let b = map.get(key);
+    if (!b || version > b.version) map.set(key, (b = { version, bal: blank(), q: blank(), ytd: blank() }));
+    else if (version < b.version) return;
+
+    if (stmt === "BPA" || stmt === "BPP") {
+      if (col("DT_FIM_EXERC") === dt) applyAccount(stmt, col, b.bal);
+      return;
+    }
+    const ini = col("DT_INI_EXERC");
+    const fim = col("DT_FIM_EXERC");
+    if (fim !== dt) return;
+    const months = monthsBetween(ini, fim);
+    if (ini.endsWith("-01-01")) applyAccount(stmt, col, b.ytd); // acumulado no ano
+    if (months === 3 && stmt === "DRE") applyAccount(stmt, col, b.q); // só os 3 meses
+  });
+  await eachZipLine(zipPath, (n) => /_(BPA|BPP|DRE|DFC_M[DI])_(con|ind)_|composicao_capital/.test(n), reader);
+
+  const keys = new Set([...raw.con.keys(), ...raw.ind.keys()]);
+  for (const key of keys) {
+    const [cnpj, d] = key.split("|");
+    const con = raw.con.get(key);
+    const ind = raw.ind.get(key);
+    const ok = (b?: Blocks) => b && b.ytd.v.niTotal !== undefined && b.bal.v.eqTotal !== undefined;
+    const b = ok(con) ? con! : ok(ind) ? ind! : null;
+    if (!b) continue;
+    const isCon = b === con;
+    // no 1º trimestre o acumulado é o próprio trimestre
+    const q = d.slice(5, 7) === "03" ? b.ytd : b.q;
+    const qf = flowsOf(q, isCon);
+    const row: QuarterRow = { d, con: isCon, rev: qf.rev, ebit: qf.ebit, ni: qf.ni, ...balanceOf(b.bal, isCon) };
+    const sh = shares.get(key);
+    if (sh && sh.sh > 0) {
+      row.sh = sh.sh;
+      row.shTreas = sh.treas;
+    }
+    const list = out.get(cnpj) ?? out.set(cnpj, new Map()).get(cnpj)!;
+    list.set(d, { row, ytd: flowsOf(b.ytd, isCon) });
+  }
+}
+
+/**
+ * Fecha a série trimestral: dividendos do trimestre (DFC só traz o acumulado) e o 4º trimestre,
+ * que não tem ITR: exercício anual (DFP) menos o acumulado até setembro.
+ */
+function finishQuarters(itr: Map<string, Map<string, QuarterRaw>>, annual: Record<string, AnnualRow[]>): Record<string, QuarterRow[]> {
+  const out: Record<string, QuarterRow[]> = {};
+  for (const [cnpj, byDate] of itr) {
+    const years = new Set([...byDate.keys()].map((d) => Number(d.slice(0, 4))));
+    for (const y of years) {
+      const q3 = byDate.get(`${y}-09-30`);
+      const a = annual[cnpj]?.find((r) => r.y === y);
+      if (!q3 || !a || a.con !== q3.row.con || byDate.has(`${y}-12-31`)) continue;
+      const minus = (x?: number, z?: number) => (x !== undefined && z !== undefined ? x - z : undefined);
+      byDate.set(`${y}-12-31`, {
+        row: {
+          d: `${y}-12-31`,
+          con: a.con,
+          rev: minus(a.rev, q3.ytd.rev),
+          ebit: minus(a.ebit, q3.ytd.ebit),
+          ni: minus(a.ni, q3.ytd.ni),
+          eq: a.eq,
+          assets: a.assets,
+          ca: a.ca,
+          cl: a.cl,
+          ncl: a.ncl,
+          debtS: a.debtS,
+          debtL: a.debtL,
+          cash: a.cash,
+          sh: a.sh,
+          shTreas: a.shTreas,
+        },
+        ytd: { rev: a.rev, ebit: a.ebit, ni: a.ni, niTotal: a.niTotal, div: a.div ?? 0 } as Flows,
+      });
+    }
+    const dates = [...byDate.keys()].sort();
+    const rows: QuarterRow[] = [];
+    for (const d of dates) {
+      const cur = byDate.get(d)!;
+      const prevD = dates[dates.indexOf(d) - 1];
+      const prev = prevD && prevD.slice(0, 4) === d.slice(0, 4) ? byDate.get(prevD) : undefined;
+      const div = d.slice(5, 7) === "03" ? cur.ytd.div : prev && prev.row.con === cur.row.con ? cur.ytd.div - prev.ytd.div : undefined;
+      rows.push(clean({ ...cur.row, div: div !== undefined && div >= 0 ? div : undefined }));
+    }
+    out[cnpj] = rows;
+  }
+  return out;
 }
 
 // ---------- FRE: capital social e desdobramentos ----------
@@ -554,6 +716,14 @@ async function main() {
   }
   deriveSplits(capital, eventsAll);
 
+  // trimestres dos dois últimos anos (ITR); o 4º trimestre sai do anual
+  const itr = new Map<string, Map<string, QuarterRaw>>();
+  for (const y of [lastYear - 1, lastYear]) {
+    const zip = await download(`${CVM}/ITR/DADOS/itr_cia_aberta_${y}.zip`, `itr_${y}.zip`, true);
+    if (zip) await parseItr(zip, itr);
+    log(`  ITR ${y}: ${zip ? "ok" : "ausente"}`);
+  }
+
   // nº de ações por ano: DFP (2020+) ou capital social do FRE do ano
   for (const [cnpj, rows] of Object.entries(annual)) {
     rows.sort((a, b) => a.y - b.y);
@@ -591,6 +761,19 @@ async function main() {
   const splitsOut = Object.fromEntries(Object.entries(eventsAll).filter(([c]) => listed.has(c)));
 
   writeJson("annual.json", annualOut);
+  const quarters = finishQuarters(itr, annual);
+  // nº de ações informado em milhares por algumas empresas: compara com o anual já corrigido
+  for (const [cnpj, rows] of Object.entries(quarters)) {
+    const ref = [...(annual[cnpj] ?? [])].reverse().find((r) => r.sh)?.sh;
+    if (!ref) continue;
+    for (const q of rows) {
+      if (q.sh && ref / q.sh > 300 && ref / q.sh < 3000) {
+        q.sh *= 1000;
+        if (q.shTreas) q.shTreas *= 1000;
+      }
+    }
+  }
+  writeJson("quarters.json", Object.fromEntries(Object.entries(quarters).filter(([c]) => listed.has(c))));
   writeJson("capital.json", Object.fromEntries(Object.entries(capital).filter(([c]) => listed.has(c))));
   writeJson("splits.json", splitsOut);
   meta.years = [...new Set([...meta.years, ...years])].sort();

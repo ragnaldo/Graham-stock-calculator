@@ -9,8 +9,14 @@ Triagem de ações da B3 pelas estratégias de Benjamin Graham, com fundamentos 
   Não precisa instalar nada.
 - **Na web**: https://ragnaldo.github.io/Graham-stock-calculator/ (GitHub Pages).
 
-O botão **Atualizar** busca as cotações do dia na [brapi.dev](https://brapi.dev) e recalcula P/L, P/VP, DY e as
-margens de segurança. Dentro do claude.ai esse acesso é bloqueado; nesse caso a página mostra os dados da última coleta.
+O botão **Atualizar** faz duas buscas:
+
+1. **Fundamentos**: baixa a base mais recente publicada no site (`data.json`), com indicadores do Fundamentus e
+   balanços anuais e trimestrais da CVM. O workflow do GitHub coleta tudo de novo todo dia útil às 12:47 e às 20:37.
+2. **Cotações**: busca os preços do momento na [brapi.dev](https://brapi.dev) e recalcula P/L, P/VP, DY e margens.
+
+Funciona no site e no arquivo baixado. Dentro do claude.ai o acesso a outros sites é bloqueado; ali a página mostra
+os dados embutidos.
 
 ## O que tem
 
@@ -47,9 +53,9 @@ npm run data:quotes
 npm run build
 ```
 
-O site no GitHub Pages é gerado pelo workflow `.github/workflows/pages.yml` a cada push e todo dia útil às 20:37,
-com os indicadores do dia. Os balanços (CVM) e preços históricos (B3) vêm de `data/` no repositório: rode
-`npm run data:update` e faça push para renová-los. Para republicar na hora: **Actions → Publicar site → Run workflow**.
+O site no GitHub Pages é gerado pelo workflow `.github/workflows/pages.yml` a cada push e todo dia útil às 12:47 e
+20:37: coleta os anos recentes da CVM (inclusive trimestres) e da B3 e os indicadores do Fundamentus. Os anos
+antigos vêm de `data/` no repositório. Para republicar na hora: **Actions → Publicar site → Run workflow**.
 
 `npm run data:update` baixa só os anos faltantes e os dois mais recentes; `-- --full` refaz tudo desde 2010
 (≈ 1 GB de downloads, guardados em `.cache/downloads`).

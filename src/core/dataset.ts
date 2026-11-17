@@ -1,6 +1,6 @@
 // Formato da base embutida no HTML e montagem das linhas/detalhes a partir dela.
 // TypeScript puro: roda no navegador (app web) e no Node (testes e scripts).
-import { adjustPrices, buildAnnual, splitFactorAfter, summarize, type AnnualRaw, type Split } from "./history";
+import { adjustPrices, buildAnnual, buildQuarters, buildTtm, splitFactorAfter, summarize, type AnnualRaw, type QuarterRaw, type Split } from "./history";
 import type { DividendEvent, Snapshot, StockDetail, StockRow } from "./types";
 
 export interface Company {
@@ -35,9 +35,13 @@ export interface WebDataset {
   /** Quando a base histórica (CVM/B3) foi gerada (ISO). */
   historyAt: string | null;
   lastFiscalYear: number | null;
+  /** Fim do trimestre mais recente com balanço na base (YYYY-MM-DD). */
+  lastQuarter?: string | null;
   snapshots: Snapshot[];
   companies: Company[];
   annual: Record<string, AnnualRaw[]>;
+  /** Trimestres recentes por CNPJ (ITR). */
+  quarters: Record<string, QuarterRaw[]>;
   prices: Record<string, PriceSeries>;
   extras: Record<string, TickerExtra>;
 }
@@ -48,6 +52,7 @@ export interface TickerData {
   /** Ações por unit (1 para ON/PN); null quando a composição não pôde ser lida. */
   unitShares: number | null;
   annual: AnnualRaw[];
+  quarters: QuarterRaw[];
   monthly: Record<string, number>;
   splits: Split[];
 }
@@ -67,6 +72,7 @@ export function indexDataset(ds: WebDataset) {
       kind: t.kind,
       unitShares: t.kind === "UNIT" ? (t.unitShares ?? null) : 1,
       annual: ds.annual[company.cnpj] ?? [],
+      quarters: ds.quarters?.[company.cnpj] ?? [],
       monthly: series?.m ?? {},
       splits: series?.splits ?? [],
     };
@@ -102,7 +108,8 @@ export function repriceSnapshot(s: Snapshot, price: number): Snapshot {
   return out;
 }
 
-export function buildDetail(row: StockRow, extra: TickerExtra | null, data: TickerData | null): Omit<StockDetail, "updatedAt"> {
+/** `today` (YYYY-MM-DD) define a janela de 12 meses dos proventos. */
+export function buildDetail(row: StockRow, extra: TickerExtra | null, data: TickerData | null, today = new Date().toISOString().slice(0, 10)): Omit<StockDetail, "updatedAt"> {
   const warnings: string[] = [];
   const splits = data?.splits ?? [];
   const raw = extra?.d ?? null;
@@ -131,6 +138,14 @@ export function buildDetail(row: StockRow, extra: TickerExtra | null, data: Tick
     if (!Object.keys(data.monthly).length) warnings.push("Sem histórico de preços na B3 para este código.");
   }
 
+  // últimos 12 meses e trimestres (ITR)
+  const yearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+  const dps12m = raw ? dividends.filter((d) => d.date > yearAgo && d.date <= today).reduce((s, d) => s + d.value, 0) : null;
+  const unit = data?.unitShares ?? null;
+  const current = extra?.info.shares ?? null;
+  const quarters = data && unit ? buildQuarters(data.quarters, splits, unit, current) : [];
+  const ttm = data && unit ? buildTtm(data.quarters, splits, unit, row.price, dps12m, current) : null;
+
   const empty: StockDetail["info"] = {
     company: null,
     type: null,
@@ -150,6 +165,8 @@ export function buildDetail(row: StockRow, extra: TickerExtra | null, data: Tick
     info: extra?.info ?? empty,
     fundamentals: (extra?.f ?? []).map(([label, value, unit]) => ({ label, value, unit })),
     annual,
+    ttm,
+    quarters,
     prices: data ? adjustPrices(data.monthly, splits) : [],
     dividends,
     dividendsByYear: [...byYear.entries()].sort((a, b) => a[0] - b[0]).map(([year, value]) => ({ year, value })),

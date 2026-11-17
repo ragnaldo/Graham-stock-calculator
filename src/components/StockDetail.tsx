@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMultiple, fmtNumber, fmtPct, fmtPrice } from "@/core/format";
 import { STRATEGIES, defaultParams, runStrategy, type StrategyResult } from "@/core/strategies";
-import type { AnnualPoint, StockDetail as Detail } from "@/core/types";
+import type { AnnualPoint, QuarterPoint, StockDetail as Detail } from "@/core/types";
 import { useConfig } from "@/lib/useConfig";
-import { getDetail, getStocks, refreshQuotes } from "@/web/data";
+import { getDetail, getStocks, refreshAll } from "@/web/data";
 import { Chart } from "./charts";
 import { Button, Card, Margin, Spinner, VerdictBadge, VerdictIcon } from "./ui";
 
@@ -72,6 +72,21 @@ function StrategyCard({ name, description, result }: { name: string; description
   );
 }
 
+const thousand = (v: number | null) => fmtCompact(v !== null ? v * 1000 : null, "");
+const QUARTER_COLUMNS: { label: string; title?: string; get: (q: QuarterPoint) => React.ReactNode }[] = [
+  { label: "Receita", get: (q) => thousand(q.revenue) },
+  { label: "EBIT", get: (q) => thousand(q.ebit) },
+  { label: "Lucro líq.", get: (q) => thousand(q.netIncome) },
+  { label: "Lucro vs ano ant.", title: "Variação do lucro sobre o mesmo trimestre do ano anterior", get: (q) => <Margin value={q.netIncomeYoY} /> },
+  { label: "Mrg. líq.", get: (q) => fmtPct(q.netMargin) },
+  { label: "LPA", title: "Lucro por ação no trimestre, ajustado", get: (q) => fmtNumber(q.lpa) },
+  { label: "Prov. pagos", title: "Dividendos e JCP pagos no trimestre (fluxo de caixa)", get: (q) => thousand(q.dividendsPaid) },
+  { label: "Patrimônio", get: (q) => thousand(q.equity) },
+  { label: "Dív. bruta", get: (q) => thousand(q.grossDebt) },
+  { label: "Dív./PL", get: (q) => fmtMultiple(q.debtToEquity) },
+  { label: "Liq. corr.", get: (q) => fmtMultiple(q.currentRatio) },
+];
+
 const ANNUAL_COLUMNS: { label: string; title?: string; get: (a: AnnualPoint) => string }[] = [
   { label: "Cotação", title: "Último fechamento do ano, ajustado por desdobramentos", get: (a) => fmtPrice(a.price) },
   { label: "P/L", get: (a) => fmtMultiple(a.pl) },
@@ -104,8 +119,9 @@ export function StockDetail({ ticker }: { ticker: string }) {
     setBusy(true);
     setError(null);
     try {
-      await refreshQuotes();
+      const r = await refreshAll();
       setData(getDetail(ticker));
+      if (r.warning) setError(r.warning.replace(/^Não atualizou: /, ""));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -162,7 +178,10 @@ export function StockDetail({ ticker }: { ticker: string }) {
   const quotes = getStocks();
 
   const { row, info, annual } = data;
-  const years = annual.map((a) => ({ ...a, consolidated: a.consolidated ? 1 : 0, x: a.year }));
+  // exercícios fechados + últimos 12 meses ("12M") quando há trimestres
+  const withTtm = data.ttm ? [...annual, data.ttm] : annual;
+  const years = withTtm.map((a) => ({ ...a, label: null, consolidated: a.consolidated ? 1 : 0, x: a.label ? "12M" : a.year }));
+  const quarterRows = data.quarters.map((q) => ({ ...q, x: q.label }));
   const money = (v: number) => fmtCompact(v * 1000, "");
   const short = (v: number) => fmtNumber(v, Math.abs(v) >= 100 ? 0 : 1);
   // eixo: sem decimais a partir de 10 unidades da escala (ex.: "45 bi")
@@ -199,7 +218,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
             <div className="num text-3xl font-semibold tracking-tight">{fmtPrice(row.price)}</div>
             <div className="text-xs text-ink-3">{quotes.live ? `cotação de ${fmtDateTime(quotes.updatedAt)}` : `fechamento de ${fmtDate(info.lastQuoteDate)}`}</div>
           </div>
-          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca a cotação atual e recalcula os indicadores">
+          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca os fundamentos mais recentes publicados e a cotação do momento">
             {busy ? <Spinner /> : <span aria-hidden>↻</span>}
             Atualizar
           </Button>
@@ -280,8 +299,8 @@ export function StockDetail({ ticker }: { ticker: string }) {
         />
       </div>
       <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Chart title="P/L" note="fim de cada ano" kind="line" data={years} series={[{ key: "pl", label: "P/L" }]} format={fmtMultiple} axisFormat={short} />
-        <Chart title="P/VP" note="fim de cada ano" kind="line" data={years} series={[{ key: "pvp", label: "P/VP" }]} format={fmtMultiple} axisFormat={short} />
+        <Chart title="P/L" note="fim de cada ano · 12M a preço atual" kind="line" data={years} series={[{ key: "pl", label: "P/L" }]} format={fmtMultiple} axisFormat={short} />
+        <Chart title="P/VP" note="fim de cada ano · 12M a preço atual" kind="line" data={years} series={[{ key: "pvp", label: "P/VP" }]} format={fmtMultiple} axisFormat={short} />
         <Chart title="Dividend yield" note="proventos do ano ÷ cotação final" kind="bar" data={years} series={[{ key: "dy", label: "DY" }]} format={fmtPct} axisFormat={pct0} />
         <Chart title="Lucro por ação (LPA)" note="R$, ajustado" kind="bar" data={years} series={[{ key: "lpa", label: "LPA" }]} format={fmtPrice} axisFormat={short} />
         <Chart title="Valor patrimonial por ação (VPA)" note="R$, ajustado" kind="bar" data={years} series={[{ key: "vpa", label: "VPA" }]} format={fmtPrice} axisFormat={short} />
@@ -301,7 +320,11 @@ export function StockDetail({ ticker }: { ticker: string }) {
         />
       </div>
 
-      <Card title="Histórico anual" aside={<span className="text-xs text-ink-3">Demonstrações anuais (CVM) · valores em R$</span>} className="mb-8">
+      <Card
+        title="Histórico anual"
+        aside={<span className="text-xs text-ink-3">Demonstrações anuais (CVM){data.ttm ? ` · ${data.ttm.label}: soma dos 4 últimos trimestres, a preço atual` : ""} · valores em R$</span>}
+        className="mb-8"
+      >
         {annual.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-ink-2">Sem demonstrações anuais para este papel.</p>
         ) : (
@@ -318,10 +341,10 @@ export function StockDetail({ ticker }: { ticker: string }) {
                 </tr>
               </thead>
               <tbody>
-                {[...annual].reverse().map((a) => (
-                  <tr key={a.year} className="border-b border-line last:border-0">
-                    <th scope="row" className="sticky left-0 bg-surface px-3 py-1.5 text-left font-medium">
-                      {a.year}
+                {[...(data.ttm ? [data.ttm] : []), ...[...annual].reverse()].map((a) => (
+                  <tr key={a.label ?? a.year} className={`border-b border-line last:border-0 ${a.label ? "bg-accent-soft/40" : ""}`}>
+                    <th scope="row" className={`sticky left-0 px-3 py-1.5 text-left font-medium whitespace-nowrap ${a.label ? "bg-accent-soft" : "bg-surface"}`}>
+                      {a.label ?? a.year}
                     </th>
                     {ANNUAL_COLUMNS.map((c) => (
                       <td key={c.label} className="num px-3 py-1.5 text-right whitespace-nowrap">
@@ -335,6 +358,46 @@ export function StockDetail({ ticker }: { ticker: string }) {
           </div>
         )}
       </Card>
+
+      {data.quarters.length > 0 && (
+        <>
+          <h2 className="mb-3 text-lg font-semibold">Resultados trimestrais</h2>
+          <div className="mb-4 grid gap-4 md:grid-cols-2">
+            <Chart title="Lucro líquido por trimestre" note="R$, 3 meses" kind="bar" data={quarterRows} series={[{ key: "netIncome", label: "Lucro" }]} format={money} axisFormat={moneyAxis} />
+            <Chart title="Receita líquida por trimestre" note="R$, 3 meses" kind="bar" data={quarterRows} series={[{ key: "revenue", label: "Receita" }]} format={money} axisFormat={moneyAxis} />
+          </div>
+          <Card title="Trimestres" aside={<span className="text-xs text-ink-3">ITR (CVM) · 4º trimestre = ano menos 9 meses · valores em R$</span>} className="mb-8">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-line text-xs text-ink-2">
+                    <th className="sticky left-0 bg-surface px-3 py-2 text-left font-medium">Trimestre</th>
+                    {QUARTER_COLUMNS.map((c) => (
+                      <th key={c.label} title={c.title} className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                        {c.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...data.quarters].reverse().map((q) => (
+                    <tr key={q.date} className="border-b border-line last:border-0">
+                      <th scope="row" className="sticky left-0 bg-surface px-3 py-1.5 text-left font-medium">
+                        {q.label}
+                      </th>
+                      {QUARTER_COLUMNS.map((c) => (
+                        <td key={c.label} className="num px-3 py-1.5 text-right whitespace-nowrap">
+                          {c.get(q)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
 
       <h2 className="mb-3 text-lg font-semibold">Proventos</h2>
       <div className="grid gap-4 lg:grid-cols-2">
