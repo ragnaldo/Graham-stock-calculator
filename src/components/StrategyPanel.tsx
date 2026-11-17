@@ -1,4 +1,3 @@
-"use client";
 import { DEFAULT_CONFIG, FIELDS, STRATEGIES, defaultParams, type ActiveStrategy, type Rule, type ScreenConfig, type Strategy } from "@/core/strategies";
 import { Button } from "./ui";
 

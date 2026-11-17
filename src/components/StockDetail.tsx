@@ -1,14 +1,13 @@
-"use client";
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMultiple, fmtNumber, fmtPct, fmtPrice } from "@/core/format";
 import { STRATEGIES, defaultParams, runStrategy, type StrategyResult } from "@/core/strategies";
 import type { AnnualPoint, StockDetail as Detail } from "@/core/types";
 import { useConfig } from "@/lib/useConfig";
+import { getDetail, getStocks, refreshQuotes } from "@/web/data";
 import { Chart } from "./charts";
 import { Button, Card, Margin, Spinner, VerdictBadge, VerdictIcon } from "./ui";
 
-type Payload = Detail & { stale?: boolean };
+type Payload = Detail;
 
 const RANGES = [
   { id: "5a", label: "5 anos", months: 60 },
@@ -95,34 +94,24 @@ const ANNUAL_COLUMNS: { label: string; title?: string; get: (a: AnnualPoint) => 
 
 export function StockDetail({ ticker }: { ticker: string }) {
   const [config] = useConfig();
-  const [data, setData] = useState<Payload | null>(null);
+  const [data, setData] = useState<Payload | null>(() => getDetail(ticker));
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]["id"]>("10a");
   const [allDividends, setAllDividends] = useState(false);
 
-  const load = useCallback(
-    async (refresh: boolean) => {
-      setBusy(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/stocks/${ticker}${refresh ? "?refresh=1" : ""}`);
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Falha ao carregar o papel");
-        setData(body);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [ticker],
-  );
-  useEffect(() => {
-    // carga inicial: o estado só muda depois da resposta
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load(false);
-  }, [load]);
+  const refresh = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await refreshQuotes();
+      setData(getDetail(ticker));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // todas as estratégias de Graham, com os parâmetros salvos na triagem
   const analysis = useMemo(() => {
@@ -153,13 +142,24 @@ export function StockDetail({ ticker }: { ticker: string }) {
           {error}
         </p>
         <p className="mt-4">
-          <Link href="/" className="text-accent underline">
+          <a href="#" className="text-accent underline">
             Voltar à lista
-          </Link>
+          </a>
         </p>
       </div>
     );
-  if (!data) return <p className="px-4 py-16 text-center text-sm text-ink-2">Carregando {ticker}…</p>;
+  if (!data)
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-16 text-center">
+        <p className="text-ink-2">Papel {ticker} não encontrado na base.</p>
+        <p className="mt-4">
+          <a href="#" className="text-accent underline">
+            Voltar à lista
+          </a>
+        </p>
+      </div>
+    );
+  const quotes = getStocks();
 
   const { row, info, annual } = data;
   const years = annual.map((a) => ({ ...a, consolidated: a.consolidated ? 1 : 0, x: a.year }));
@@ -182,9 +182,9 @@ export function StockDetail({ ticker }: { ticker: string }) {
   return (
     <div className="mx-auto max-w-[1300px] px-4 pb-16">
       <nav className="py-4 text-sm">
-        <Link href="/" className="text-accent hover:underline">
+        <a href="#" className="text-accent hover:underline">
           ← Todas as ações
-        </Link>
+        </a>
       </nav>
 
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
@@ -197,9 +197,9 @@ export function StockDetail({ ticker }: { ticker: string }) {
         <div className="flex items-center gap-4">
           <div className="text-right">
             <div className="num text-3xl font-semibold tracking-tight">{fmtPrice(row.price)}</div>
-            <div className="text-xs text-ink-3">fechamento de {fmtDate(info.lastQuoteDate)}</div>
+            <div className="text-xs text-ink-3">{quotes.live ? `cotação de ${fmtDateTime(quotes.updatedAt)}` : `fechamento de ${fmtDate(info.lastQuoteDate)}`}</div>
           </div>
-          <Button variant="primary" onClick={() => load(true)} disabled={busy} title="Busca os dados atuais deste papel na fonte">
+          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca a cotação atual e recalcula os indicadores">
             {busy ? <Spinner /> : <span aria-hidden>↻</span>}
             Atualizar
           </Button>
@@ -249,8 +249,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
           <Stat label="Valor da firma (EV)" value={fmtCompact(info.enterpriseValue)} />
         </dl>
         <p className="border-t border-line px-4 py-2 text-xs text-ink-3">
-          Último balanço processado: {fmtDate(info.lastBalanceDate)} · dados de {fmtDateTime(data.updatedAt)}
-          {data.stale ? " (fonte indisponível; último valor salvo)" : ""}
+          Último balanço processado: {fmtDate(info.lastBalanceDate)} · indicadores coletados em {fmtDateTime(data.updatedAt)}
         </p>
       </Card>
 

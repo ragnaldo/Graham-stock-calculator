@@ -1,9 +1,9 @@
 // Provedor de cotações e fundamentos atuais: fundamentus.com.br (leitura das páginas públicas).
 // Para trocar de fonte, implemente as mesmas três funções em outro módulo.
-import type { Snapshot } from "@/core/types";
+import type { Snapshot } from "../src/core/types";
 
 const BASE = "https://www.fundamentus.com.br";
-const HEADERS = {
+export const HEADERS = {
   "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
   accept: "text/html,application/xhtml+xml",
   "accept-language": "pt-BR,pt;q=0.9",

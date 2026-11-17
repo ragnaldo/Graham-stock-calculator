@@ -1,4 +1,3 @@
-"use client";
 import { useCallback, useSyncExternalStore } from "react";
 import { DEFAULT_CONFIG, getStrategy, type ScreenConfig } from "@/core/strategies";
 

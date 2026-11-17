@@ -253,7 +253,8 @@ async function parseDfp(zipPath: string, year: number, out: Record<string, Annua
       con: isCon,
       rev: v.rev,
       ebit: v.ebit,
-      ni: isCon ? (v.niCtrl ?? v.niTotal) : v.niTotal,
+      // algumas empresas preenchem com zero a linha dos controladores: vale o lucro total
+      ni: isCon && v.niCtrl !== undefined && (v.niCtrl !== 0 || !v.niTotal) ? v.niCtrl : v.niTotal,
       niTotal: v.niTotal,
       eq: v.eqTotal !== undefined ? v.eqTotal - (isCon ? (v.minority ?? 0) : 0) : undefined,
       assets: v.assets,

@@ -1,15 +1,12 @@
-"use client";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { fmtCompact, fmtDateTime, fmtMultiple, fmtPct, fmtPrice } from "@/core/format";
 import { getStrategy, screen, type Evaluated, type ScreenConfig } from "@/core/strategies";
-import type { StocksPayload } from "@/core/types";
 import { useConfig } from "@/lib/useConfig";
+import { getStocks, refreshQuotes } from "@/web/data";
 import { StrategyPanel } from "./StrategyPanel";
 import { Button, Margin, Spinner, VerdictIcon } from "./ui";
 
-type Payload = StocksPayload & { stale?: boolean };
+type Payload = ReturnType<typeof getStocks>;
 
 interface Column {
   id: string;
@@ -66,38 +63,32 @@ function strategyColumns(config: ScreenConfig): Column[] {
 }
 
 export function Screener() {
-  const router = useRouter();
   const [config, setConfig] = useConfig();
-  const [data, setData] = useState<Payload | null>(null);
+  const [data, setData] = useState<Payload>(getStocks);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("");
   const [sort, setSort] = useState<{ id: string; dir: 1 | -1 } | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
-  const load = useCallback(async (refresh: boolean) => {
+  const refresh = async () => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      const res = await fetch(refresh ? "/api/stocks/refresh" : "/api/stocks", { method: refresh ? "POST" : "GET" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Falha ao carregar os dados");
-      setData(body);
+      const next = await refreshQuotes();
+      setData(next);
+      setNotice(`Cotações de ${next.updated} papéis atualizadas. P/L, P/VP, DY e margens recalculados com o preço atual.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    // carga inicial: o estado só muda depois da resposta
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load(false);
-  }, [load]);
-
-  const evaluated = useMemo(() => (data ? screen(data.stocks, config) : []), [data, config]);
+  const evaluated = useMemo(() => screen(data.stocks, config), [data, config]);
   const sectors = useMemo(() => [...new Set(evaluated.map((e) => e.stock.sector).filter((s): s is string => !!s))].sort((a, b) => a.localeCompare(b)), [evaluated]);
   const columns = useMemo(() => [...BASE_COLUMNS, ...strategyColumns(config)], [config]);
   const passed = evaluated.filter((e) => e.pass).length;
@@ -130,21 +121,15 @@ export function Screener() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Calculadora Graham · B3</h1>
           <p className="mt-0.5 text-sm text-ink-2">
-            {data ? (
-              <>
-                Cotações e fundamentos de {fmtDateTime(data.updatedAt)}
-                {data.dataset.lastYear ? ` · balanços anuais até ${data.dataset.lastYear}` : ""}
-              </>
-            ) : (
-              "Carregando cotações e fundamentos…"
-            )}
+            {data.live ? `Cotações ao vivo de ${fmtDateTime(data.updatedAt)} · indicadores de ${fmtDateTime(data.baseAt)}` : `Cotações e indicadores de ${fmtDateTime(data.updatedAt)}`}
+            {data.dataset.lastYear ? ` · balanços anuais até ${data.dataset.lastYear}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="lg:hidden">
             <Button onClick={() => setPanelOpen((v) => !v)}>{panelOpen ? "Fechar filtros" : `Estratégias (${config.active.length})`}</Button>
           </span>
-          <Button variant="primary" onClick={() => load(true)} disabled={busy} title="Busca cotações e fundamentos atuais na fonte">
+          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca as cotações atuais e recalcula os indicadores">
             {busy ? <Spinner /> : <span aria-hidden>↻</span>}
             Atualizar
           </Button>
@@ -156,9 +141,9 @@ export function Screener() {
           Não foi possível atualizar: {error}
         </p>
       )}
-      {data?.stale && (
-        <p role="status" className="mb-4 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn">
-          A fonte não respondeu; exibindo os últimos dados salvos ({fmtDateTime(data.updatedAt)}).
+      {notice && (
+        <p role="status" className="mb-4 rounded-lg border border-good/40 bg-good-soft px-4 py-3 text-sm text-good">
+          {notice}
         </p>
       )}
 
@@ -202,14 +187,14 @@ export function Screener() {
               </thead>
               <tbody>
                 {rows.map((e) => (
-                  <tr key={e.stock.ticker} onClick={() => router.push(`/acao/${e.stock.ticker}`)} className={`cursor-pointer border-b border-line last:border-0 hover:bg-surface-2 ${e.pass ? "" : "text-ink-3"}`}>
+                  <tr key={e.stock.ticker} onClick={() => (location.hash = e.stock.ticker)} className={`cursor-pointer border-b border-line last:border-0 hover:bg-surface-2 ${e.pass ? "" : "text-ink-3"}`}>
                     <td className="sticky left-0 z-10 max-w-[8.5rem] bg-inherit sm:max-w-[13rem] px-3 py-2 [tr:not(:hover)>&]:bg-surface">
                       <span className="flex items-center gap-2">
                         {config.showFailed && <VerdictIcon pass={e.pass} />}
                         <span className="min-w-0">
-                          <Link href={`/acao/${e.stock.ticker}`} onClick={(ev) => ev.stopPropagation()} className="font-semibold text-ink hover:underline">
+                          <a href={`#${e.stock.ticker}`} onClick={(ev) => ev.stopPropagation()} className="font-semibold text-ink hover:underline">
                             {e.stock.ticker}
-                          </Link>
+                          </a>
                           <span className="block truncate text-xs text-ink-3">{e.stock.name ?? "—"}</span>
                         </span>
                       </span>
@@ -223,16 +208,15 @@ export function Screener() {
                 ))}
               </tbody>
             </table>
-            {!busy && data && rows.length === 0 && (
+            {rows.length === 0 && (
               <p className="px-4 py-10 text-center text-sm text-ink-2">
                 Nenhum papel passa nos filtros atuais. Afrouxe os parâmetros, troque para “Qualquer (OU)” ou marque “Mostrar também as reprovadas”.
               </p>
             )}
-            {busy && !data && <p className="px-4 py-10 text-center text-sm text-ink-2">Carregando…</p>}
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-ink-3">
-            Fontes: {data?.source ?? "—"}. Margem = 1 − cotação ÷ preço teto. Ferramenta de estudo; não é recomendação de investimento.
+            Fontes: {data.source}. Margem = 1 − cotação ÷ preço teto. Ferramenta de estudo; não é recomendação de investimento.
           </p>
         </main>
       </div>
