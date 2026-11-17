@@ -7,7 +7,7 @@ Triagem de ações da B3 pelas estratégias de Benjamin Graham, com fundamentos 
 
 - **No computador**: baixe [`dist/calculadora-graham.html`](dist/calculadora-graham.html) e abra com dois cliques.
   Não precisa instalar nada.
-- **Na web**: o mesmo arquivo funciona em qualquer hospedagem de páginas estáticas (GitHub Pages, Netlify, claude.ai).
+- **Na web**: https://ragnaldo.github.io/Graham-stock-calculator/ (GitHub Pages).
 
 O botão **Atualizar** busca as cotações do dia na [brapi.dev](https://brapi.dev) e recalcula P/L, P/VP, DY e as
 margens de segurança. Dentro do claude.ai esse acesso é bloqueado; nesse caso a página mostra os dados da última coleta.
@@ -46,6 +46,10 @@ npm run data:quotes
 ```bash
 npm run build
 ```
+
+O site no GitHub Pages é gerado pelo workflow `.github/workflows/pages.yml` a cada push e todo dia útil às 20:37,
+com os indicadores do dia. Os balanços (CVM) e preços históricos (B3) vêm de `data/` no repositório: rode
+`npm run data:update` e faça push para renová-los. Para republicar na hora: **Actions → Publicar site → Run workflow**.
 
 `npm run data:update` baixa só os anos faltantes e os dois mais recentes; `-- --full` refaz tudo desde 2010
 (≈ 1 GB de downloads, guardados em `.cache/downloads`).

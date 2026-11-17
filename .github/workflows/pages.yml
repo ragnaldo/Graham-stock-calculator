@@ -1,0 +1,59 @@
+name: Publicar site
+
+on:
+  push:
+    branches: [claude/lucid-babbage-5ji5cf]
+  schedule:
+    # dias úteis às 20:37 (Brasília), depois do pregão: coleta indicadores atuais e republica
+    - cron: "37 23 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Coletar cotações e indicadores (Fundamentus)
+        # se a fonte falhar, o site sai com a última coleta salva no repositório
+        run: npm run data:quotes || echo "::warning::Fundamentus indisponível; usando data/snapshot.json do repositório"
+
+      - run: npm test
+
+      - name: Gerar o HTML
+        run: |
+          npm run build
+          mkdir -p _site
+          cp dist/calculadora-graham.html _site/index.html
+          touch _site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
