@@ -88,6 +88,7 @@ async function main() {
     legalComments: "none",
     define: { "process.env.NODE_ENV": '"production"', __DATA_URL__: JSON.stringify(DATA_URL) },
     alias: { "@": path.join(ROOT, "src") },
+    loader: { ".gs": "text" },
     logLevel: "warning",
   });
   const code = js.outputFiles[0].text;

@@ -3,7 +3,9 @@ import { fmtCompact, fmtDate, fmtNumber, fmtPct, fmtPrice } from "@/core/format"
 import { computePortfolio, parseBackup, type Operation } from "@/core/portfolio";
 import { getBenchmarks, portfolioContext, priceOn, tickerOptions } from "@/web/data";
 import { storageWorks, useDataVersion, useOperations } from "@/web/hooks";
+import { getSheetsConfig } from "@/web/sync";
 import { Chart } from "./charts";
+import { SheetsSync } from "./SheetsSync";
 import { Button, Card, Margin } from "./ui";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -256,7 +258,9 @@ export function Portfolio() {
         </div>
       </header>
 
-      {!persists && (
+      <SheetsSync />
+
+      {!persists && !getSheetsConfig() && (
         <p role="status" className="mb-4 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn">
           Este navegador não está deixando salvar dados (aba anônima ou bloqueio). As operações valem só até fechar a página: use Exportar backup.
         </p>
@@ -536,8 +540,10 @@ export function Portfolio() {
       )}
 
       <p className="mt-4 text-xs leading-relaxed text-ink-3">
-        As operações ficam guardadas só neste navegador, neste aparelho. Use Exportar backup para guardar uma cópia ou levar para outro aparelho. Valores do dia usam a cotação mais
-        recente; o gráfico usa fechamentos mensais. Proventos contam pela data com, mesmo os ainda não pagos.
+        {getSheetsConfig()
+          ? "As operações ficam na sua planilha do Google e numa cópia neste navegador."
+          : "Sem planilha conectada, as operações ficam só neste navegador: conecte o Google Planilhas ou use Exportar backup."}{" "}
+        Valores do dia usam a cotação mais recente; o gráfico usa fechamentos mensais. Proventos contam pela data com, mesmo os ainda não pagos.
       </p>
     </div>
   );

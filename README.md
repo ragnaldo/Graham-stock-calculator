@@ -23,6 +23,10 @@ os dados embutidos.
 - **Minha carteira**: cadastre compras e vendas (papel, data, quantidade, preço, taxas). Calcula preço médio,
   corrige desdobramentos, soma proventos pela data com e compara a rentabilidade com Ibovespa e CDI simulando os
   mesmos aportes nas mesmas datas. As operações ficam no navegador; use **Exportar backup** para guardar uma cópia.
+- **Google Planilhas**: em **Minha carteira → Conectar planilha**, a tela mostra o passo a passo e o código do
+  script (`apps-script/Codigo.gs`, com a chave já preenchida). Depois de conectar, cada alteração vai para a aba
+  "Operações" da sua planilha e qualquer aparelho conectado com o mesmo endereço e chave lê de lá. Dá para editar
+  as operações direto na planilha; alterações dos dois lados são juntadas.
 - **Oportunidades**: empresas lucrativas e em operação normal, abaixo do Número de Graham ou do teto de Bazin e com
   4+ critérios do investidor defensivo, ordenadas por nota. Triagem para estudo, não recomendação.
 - **Análise completa** na página de cada papel: preço teto central, rentabilidade, crescimento, endividamento,
