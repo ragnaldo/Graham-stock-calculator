@@ -186,7 +186,7 @@ export function SheetsSync() {
       </div>
       {msg && <Msg msg={msg} />}
       {open && (
-        <div className="grid gap-5 border-t border-line p-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 border-t border-line p-4 lg:grid-cols-2">
           <ol className="min-w-0 list-decimal space-y-3 pl-5 text-sm">
             <li>
               Crie uma planilha nova no Google:{" "}

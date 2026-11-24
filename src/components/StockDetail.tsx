@@ -222,7 +222,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
       <FullAnalysis detail={data} results={analysis} />
 
       <h2 className="mb-3 text-lg font-semibold">Critérios por estratégia</h2>
-      <div className="mb-8 grid gap-4 lg:grid-cols-2">
+      <div className="mb-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {analysis.map(({ strategy, result }) => (
           <StrategyCard key={strategy.id} name={strategy.name} description={strategy.description} result={result} />
         ))}
@@ -268,7 +268,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
           xTickFormat={(x) => String(x).slice(0, 4)}
         />
       </div>
-      <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Chart title="P/L" note="fim de cada ano · 12M a preço atual" kind="line" data={years} series={[{ key: "pl", label: "P/L" }]} format={fmtMultiple} axisFormat={short} />
         <Chart title="P/VP" note="fim de cada ano · 12M a preço atual" kind="line" data={years} series={[{ key: "pvp", label: "P/VP" }]} format={fmtMultiple} axisFormat={short} />
         <Chart title="Dividend yield" note="proventos do ano ÷ cotação final" kind="bar" data={years} series={[{ key: "dy", label: "DY" }]} format={fmtPct} axisFormat={pct0} />
@@ -332,7 +332,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
       {data.quarters.length > 0 && (
         <>
           <h2 className="mb-3 text-lg font-semibold">Resultados trimestrais</h2>
-          <div className="mb-4 grid gap-4 md:grid-cols-2">
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <Chart title="Lucro líquido por trimestre" note="R$, 3 meses" kind="bar" data={quarterRows} series={[{ key: "netIncome", label: "Lucro" }]} format={money} axisFormat={moneyAxis} />
             <Chart title="Receita líquida por trimestre" note="R$, 3 meses" kind="bar" data={quarterRows} series={[{ key: "revenue", label: "Receita" }]} format={money} axisFormat={moneyAxis} />
           </div>
@@ -370,7 +370,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
       )}
 
       <h2 className="mb-3 text-lg font-semibold">Proventos</h2>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Chart
           title="Proventos por ação por ano"
           note="dividendos + JCP, data com, ajustado"

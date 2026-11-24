@@ -111,7 +111,7 @@ export function Screener() {
         </span>
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-[21rem_1fr]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[21rem_1fr]">
         <aside className={`${panelOpen ? "block" : "hidden"} rounded-xl border border-line bg-surface p-4 lg:block lg:self-start`}>
           <StrategyPanel config={config} onChange={setConfig} />
         </aside>

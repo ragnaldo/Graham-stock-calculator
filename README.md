@@ -27,6 +27,10 @@ os dados embutidos.
   script (`apps-script/Codigo.gs`, com a chave já preenchida). Depois de conectar, cada alteração vai para a aba
   "Operações" da sua planilha e qualquer aparelho conectado com o mesmo endereço e chave lê de lá. Dá para editar
   as operações direto na planilha; alterações dos dois lados são juntadas.
+- **Diversificação e balanceamento** (na carteira): nota de 0 a 100 com alertas (concentração por empresa e por grande
+  setor, número efetivo de ativos, classes da mesma empresa, estatais, liquidez, papéis em alerta), quanto comprar de
+  cada papel com o próximo aporte para chegar aos pesos-alvo (iguais ou atuais, com limites por empresa e por setor),
+  rebalanceamento com vendas opcional e oportunidades em setores que faltam na carteira.
 - **Oportunidades**: empresas lucrativas e em operação normal, abaixo do Número de Graham ou do teto de Bazin e com
   4+ critérios do investidor defensivo, ordenadas por nota. Triagem para estudo, não recomendação.
 - **Análise completa** na página de cada papel: preço teto central, rentabilidade, crescimento, endividamento,

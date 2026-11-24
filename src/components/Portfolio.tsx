@@ -5,6 +5,7 @@ import { getBenchmarks, portfolioContext, priceOn, tickerOptions } from "@/web/d
 import { storageWorks, useDataVersion, useOperations } from "@/web/hooks";
 import { getSheetsConfig } from "@/web/sync";
 import { Chart } from "./charts";
+import { Rebalance } from "./Rebalance";
 import { SheetsSync } from "./SheetsSync";
 import { Button, Card, Margin } from "./ui";
 
@@ -51,7 +52,7 @@ function OperationForm({ draft, setDraft, onSave, onCancel }: { draft: Draft; se
   };
 
   return (
-    <form onSubmit={submit} className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.9fr_1fr_0.8fr_0.9fr_0.8fr_auto] lg:items-end">
+    <form onSubmit={submit} className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.9fr_1fr_0.8fr_0.9fr_0.8fr_auto] lg:items-end">
       <label className="text-xs text-ink-2">
         Papel
         <input id="op-ticker" list="tickers" value={draft.ticker} onChange={(e) => setDraft({ ...draft, ticker: e.target.value.toUpperCase() })} placeholder="PETR4" className={`${field} mt-1 uppercase`} autoComplete="off" />
@@ -345,7 +346,7 @@ export function Portfolio() {
             <Kpi label="Proventos recebidos" value={brl(summary.dividends)} sub={<span className="text-ink-3">dividendos e JCP, pela data com</span>} />
           </div>
 
-          <div className="mb-5 grid gap-4 lg:grid-cols-[22rem_1fr]">
+          <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[22rem_1fr]">
             <Card title="Carteira vs Ibovespa vs CDI">
               <ul className="space-y-4 p-4">
                 {compare.map((c, i) => (
@@ -433,7 +434,9 @@ export function Portfolio() {
             )}
           </Card>
 
-          <div className="mb-5 grid gap-4 md:grid-cols-2">
+          {summary.positions.length > 0 && <Rebalance positions={summary.positions} version={version} />}
+
+          <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-2">
             <Card title="Alocação por ativo">
               <Bars rows={summary.positions.map((p) => ({ label: p.ticker, value: p.value, weight: p.weight, href: `#${p.ticker}` }))} />
             </Card>

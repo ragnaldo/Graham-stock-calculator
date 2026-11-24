@@ -45,7 +45,7 @@ export function Opportunities() {
       {list.length === 0 ? (
         <p className="rounded-xl border border-line bg-surface px-4 py-10 text-center text-sm text-ink-2">Nenhuma empresa passa nesses critérios hoje. Reduza a liquidez mínima.</p>
       ) : (
-        <ol className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <ol className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {list.map((o, i) => {
             const s = o.stock;
             return (

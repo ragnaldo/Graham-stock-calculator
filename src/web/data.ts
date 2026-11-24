@@ -6,6 +6,8 @@
 import { buildDetail, indexDataset, repriceSnapshot, toRow, type Company, type WebDataset } from "@/core/dataset";
 import { splitFactorAfter } from "@/core/history";
 import type { Benchmarks, PortfolioContext } from "@/core/portfolio";
+import type { AssetInfo } from "@/core/rebalance";
+import { macroSector } from "@/core/sectors";
 import type { StockDetail, StocksPayload } from "@/core/types";
 
 declare const __DATA_URL__: string;
@@ -190,5 +192,28 @@ export function portfolioContext(today = new Date().toISOString().slice(0, 10)):
     monthly: (t) => tickerData(t)?.monthly ?? {},
     name: (t) => rows.get(t)?.name ?? null,
     sector: (t) => rows.get(t)?.sector ?? null,
+  };
+}
+
+/** Dados de um papel para diversificação e balanceamento. */
+export function assetInfo(ticker: string): AssetInfo {
+  const row = getStocks().stocks.find((s) => s.ticker === ticker) ?? null;
+  const company = tickerData(ticker)?.company ?? null;
+  const status = company?.gov?.status;
+  let alert: string | null = null;
+  if (status && !/^fase operacional$/i.test(status)) alert = status.toLowerCase();
+  else {
+    const d = row ? getDetail(ticker) : null;
+    const ni = d?.ttm?.netIncome ?? (row?.lpa !== null && row?.lpa !== undefined ? row.lpa : null);
+    if (ni !== null && ni < 0) alert = "prejuízo nos últimos 12 meses";
+  }
+  return {
+    ticker,
+    company: company?.cnpj ?? ticker.slice(0, 4),
+    sector: macroSector(company?.sector ?? row?.sector),
+    price: row?.price ?? null,
+    state: /estatal/i.test(company?.gov?.control ?? ""),
+    liquidity: row?.liq2m ?? null,
+    alert,
   };
 }

@@ -33,7 +33,7 @@ export function FullAnalysis({ detail, results }: { detail: StockDetail; results
       </h2>
 
       <Card className="mb-4">
-        <div className="grid gap-5 p-4 md:grid-cols-[1fr_auto]">
+        <div className="grid grid-cols-1 gap-5 p-4 md:grid-cols-[1fr_auto]">
           <div className="min-w-0">
             <ToneBadge tone={a.tone} />
             <p className="mt-2 text-base font-medium text-balance">{a.headline}</p>
@@ -89,7 +89,7 @@ export function FullAnalysis({ detail, results }: { detail: StockDetail; results
         </div>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {a.sections.map((sec) => (
           <Card key={sec.id} title={sec.title} aside={<ToneBadge tone={sec.tone} />}>
             <ul className="divide-y divide-line">
@@ -134,7 +134,7 @@ export function FullAnalysis({ detail, results }: { detail: StockDetail; results
         ))}
 
         <Card title="Perspectivas e documentos" className="md:col-span-2 xl:col-span-3">
-          <div className="grid gap-5 p-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 p-4 lg:grid-cols-2">
             <div className="min-w-0">
               {gov?.about && (
                 <>
