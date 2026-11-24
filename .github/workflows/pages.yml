@@ -34,6 +34,9 @@ jobs:
         # anos recentes, inclusive trimestres (ITR); os anteriores vêm de data/ no repositório
         run: npm run data:update || echo "::warning::CVM ou B3 indisponível; usando a base histórica do repositório"
 
+      - name: Coletar CDI (Banco Central) e Ibovespa (B3)
+        run: npm run data:benchmarks || echo "::warning::CDI ou Ibovespa indisponível; usando data/benchmarks.json do repositório"
+
       - name: Coletar cotações e indicadores (Fundamentus)
         # se a fonte falhar, o site sai com a última coleta salva no repositório
         run: npm run data:quotes || echo "::warning::Fundamentus indisponível; usando data/snapshot.json do repositório"

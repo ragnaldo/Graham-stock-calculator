@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { fmtCompact, fmtDateTime, fmtMultiple, fmtPct, fmtPrice } from "@/core/format";
+import { fmtCompact, fmtMultiple, fmtPct, fmtPrice } from "@/core/format";
 import { getStrategy, screen, type Evaluated, type ScreenConfig } from "@/core/strategies";
-import { quarterLabel } from "@/core/history";
 import { useConfig } from "@/lib/useConfig";
-import { getStocks, refreshAll } from "@/web/data";
+import { getStocks } from "@/web/data";
+import { useDataVersion } from "@/web/hooks";
 import { StrategyPanel } from "./StrategyPanel";
-import { Button, Margin, Spinner, VerdictIcon } from "./ui";
+import { Button, Margin, VerdictIcon } from "./ui";
 
 type Payload = ReturnType<typeof getStocks>;
 
@@ -65,32 +65,12 @@ function strategyColumns(config: ScreenConfig): Column[] {
 
 export function Screener() {
   const [config, setConfig] = useConfig();
-  const [data, setData] = useState<Payload>(getStocks);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const version = useDataVersion();
+  const data = useMemo<Payload>(() => getStocks(), [version]); // eslint-disable-line react-hooks/exhaustive-deps
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("");
   const [sort, setSort] = useState<{ id: string; dir: 1 | -1 } | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
-
-  const refresh = async () => {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    setWarning(null);
-    try {
-      const r = await refreshAll();
-      setData(getStocks());
-      setNotice(r.message);
-      setWarning(r.warning);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const evaluated = useMemo(() => screen(data.stocks, config), [data, config]);
   const sectors = useMemo(() => [...new Set(evaluated.map((e) => e.stock.sector).filter((s): s is string => !!s))].sort((a, b) => a.localeCompare(b)), [evaluated]);
@@ -123,38 +103,13 @@ export function Screener() {
     <div className="mx-auto max-w-[1500px] px-4 pb-16">
       <header className="flex flex-wrap items-center justify-between gap-3 py-5">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Calculadora Graham · B3</h1>
-          <p className="mt-0.5 text-sm text-ink-2">
-            {data.live ? `Cotações ao vivo de ${fmtDateTime(data.updatedAt)} · fundamentos de ${fmtDateTime(data.baseAt)}` : `Cotações e fundamentos de ${fmtDateTime(data.updatedAt)}`}
-            {data.lastQuarter ? ` · balanços até ${quarterLabel(data.lastQuarter)}` : data.dataset.lastYear ? ` · balanços até ${data.dataset.lastYear}` : ""}
-          </p>
+          <h1 className="text-xl font-semibold tracking-tight">Ações</h1>
+          <p className="mt-0.5 text-sm text-ink-2">Triagem pelas estratégias escolhidas. Clique em um papel para a análise completa.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="lg:hidden">
-            <Button onClick={() => setPanelOpen((v) => !v)}>{panelOpen ? "Fechar filtros" : `Estratégias (${config.active.length})`}</Button>
-          </span>
-          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca os fundamentos mais recentes publicados e as cotações do momento">
-            {busy ? <Spinner /> : <span aria-hidden>↻</span>}
-            Atualizar
-          </Button>
-        </div>
+        <span className="lg:hidden">
+          <Button onClick={() => setPanelOpen((v) => !v)}>{panelOpen ? "Fechar filtros" : `Estratégias (${config.active.length})`}</Button>
+        </span>
       </header>
-
-      {error && (
-        <p role="alert" className="mb-4 rounded-lg border border-bad/40 bg-bad-soft px-4 py-3 text-sm text-bad">
-          Não foi possível atualizar: {error}
-        </p>
-      )}
-      {warning && (
-        <p role="status" className="mb-4 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn">
-          {warning}
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="mb-4 rounded-lg border border-good/40 bg-good-soft px-4 py-3 text-sm text-good">
-          {notice}
-        </p>
-      )}
 
       <div className="grid gap-5 lg:grid-cols-[21rem_1fr]">
         <aside className={`${panelOpen ? "block" : "hidden"} rounded-xl border border-line bg-surface p-4 lg:block lg:self-start`}>

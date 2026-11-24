@@ -1,34 +1,46 @@
 import { useEffect, useState } from "react";
+import { Nav, type View } from "@/components/Nav";
+import { Opportunities } from "@/components/Opportunities";
+import { Portfolio } from "@/components/Portfolio";
 import { Screener } from "@/components/Screener";
 import { StockDetail } from "@/components/StockDetail";
 
 const TICKER = /^[A-Z0-9]{4}\d{1,2}$/;
-const route = () => {
-  const h = decodeURIComponent(location.hash.slice(1)).toUpperCase();
-  return TICKER.test(h) ? h : null;
-};
 
-/** Rotas por hash: "#" = lista, "#PETR4" = página do papel. */
+/** Rotas por hash: "#" ações, "#carteira", "#oportunidades", "#PETR4" página do papel. */
+function route(): { view: View; ticker: string | null } {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h === "carteira") return { view: "carteira", ticker: null };
+  if (h === "oportunidades") return { view: "oportunidades", ticker: null };
+  const t = h.toUpperCase();
+  return TICKER.test(t) ? { view: "papel", ticker: t } : { view: "acoes", ticker: null };
+}
+
+const TITLES: Record<View, string> = { acoes: "Ações", carteira: "Minha carteira", oportunidades: "Oportunidades", papel: "" };
+
 export function App() {
-  const [ticker, setTicker] = useState(route);
+  const [r, setR] = useState(route);
   useEffect(() => {
     const onHash = () => {
-      setTicker(route());
+      setR(route());
       window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    document.title = ticker ? `${ticker} · Calculadora Graham` : "Calculadora Graham B3";
-  }, [ticker]);
-  // a lista fica montada por baixo para manter filtros e rolagem ao voltar
+    document.title = `${r.ticker ?? TITLES[r.view]} · Calculadora Graham`;
+  }, [r]);
   return (
     <>
-      <div hidden={!!ticker}>
+      <Nav view={r.view} />
+      {/* a lista fica montada por baixo para manter filtros e rolagem ao voltar */}
+      <div hidden={r.view !== "acoes"}>
         <Screener />
       </div>
-      {ticker && <StockDetail key={ticker} ticker={ticker} />}
+      {r.view === "carteira" && <Portfolio />}
+      {r.view === "oportunidades" && <Opportunities />}
+      {r.ticker && <StockDetail key={r.ticker} ticker={r.ticker} />}
     </>
   );
 }

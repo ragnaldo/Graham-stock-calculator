@@ -1,3 +1,5 @@
+import type { Governance } from "./dataset";
+
 // Tipos de domínio. Este diretório (src/core) é TypeScript puro, sem React/Next,
 // para ser reaproveitado no futuro app mobile.
 
@@ -92,6 +94,9 @@ export interface AnnualPoint {
   payout: number | null;
   currentRatio: number | null;
   debtToEquity: number | null;
+  /** Fluxo de caixa operacional e de investimento (R$ mil). */
+  cashFromOps?: number | null;
+  cashFromInvesting?: number | null;
 }
 
 export interface DividendEvent {
@@ -129,6 +134,8 @@ export interface StockDetail {
   dividends: DividendEvent[];
   dividendsByYear: { year: number; value: number }[];
   splits: { date: string; factor: number }[];
+  /** Governança e documentos da CVM. */
+  gov: Governance | null;
   warnings: string[];
 }
 

@@ -1,5 +1,6 @@
 import { fmtCompact, fmtMultiple, fmtPct } from "../format";
 import type { StockRow } from "../types";
+import { bazin } from "./bazin";
 import { grahamDefensive, grahamGrowth, grahamNetNet, grahamNumber } from "./graham";
 import type { ActiveStrategy, Criterion, Evaluated, Params, ScreenConfig, Strategy, StrategyResult } from "./types";
 import { finish, isNum } from "./util";
@@ -56,7 +57,7 @@ export const customFilter: Strategy = {
 };
 
 /** Registro de estratégias. Para criar uma nova: implemente `Strategy` e adicione aqui. */
-export const STRATEGIES: Strategy[] = [grahamNumber, grahamDefensive, grahamGrowth, grahamNetNet, customFilter];
+export const STRATEGIES: Strategy[] = [grahamNumber, grahamDefensive, grahamGrowth, grahamNetNet, bazin, customFilter];
 
 export const getStrategy = (id: string) => STRATEGIES.find((s) => s.id === id);
 

@@ -15,6 +15,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 import yauzl from "yauzl";
+import type { Governance } from "../src/core/dataset";
 
 const FIRST_YEAR = 2010;
 const ROOT = path.resolve(__dirname, "..");
@@ -43,6 +44,8 @@ export interface AnnualRow {
   div?: number; // dividendos + JCP pagos no ano (DFC), valor positivo
   sh?: number; // ações totais (unidades)
   shTreas?: number; // ações em tesouraria
+  cfo?: number; // fluxo de caixa operacional
+  cfi?: number; // fluxo de caixa de investimento
 }
 export interface CompanyInfo {
   cnpj: string;
@@ -50,6 +53,7 @@ export interface CompanyInfo {
   sector: string;
   financial: boolean;
   tickers: Record<string, { kind: "ON" | "PN" | "UNIT"; unitShares?: number | null; inferred?: boolean }>;
+  gov?: Governance;
 }
 export interface SplitEvent {
   date: string; // YYYY-MM-DD (aprovação)
@@ -189,6 +193,8 @@ function applyAccount(stmt: string, col: (name: string) => string, r: Raw) {
       } else if (depth === 3 && r.niCode && code.startsWith(r.niCode + ".") && ds.startsWith("atribuido a socios da empresa controladora"))
         r.v.niCtrl = val;
     } else if (stmt === "DFC") {
+      if (code === "6.01" && ds.startsWith("caixa liquido")) r.v.cfo = val;
+      else if (code === "6.02" && ds.startsWith("caixa liquido")) r.v.cfi = val;
       if (
         code.startsWith("6.03.") &&
         val < 0 &&
@@ -211,6 +217,9 @@ function flowsOf(r: Raw, isCon: boolean) {
     ni: isCon && v.niCtrl !== undefined && (v.niCtrl !== 0 || !v.niTotal) ? v.niCtrl : v.niTotal,
     niTotal: v.niTotal,
     div: leaf.reduce((s, [, x]) => s + x, 0),
+    /** Fluxo de caixa operacional e de investimento (R$ mil). */
+    cfo: v.cfo,
+    cfi: v.cfi,
   };
 }
 
@@ -446,6 +455,69 @@ function finishQuarters(itr: Map<string, Map<string, QuarterRaw>>, annual: Recor
   return out;
 }
 
+// ---------- FRE: acionistas; índices de documentos ----------
+/** Maiores acionistas diretos (formulário de referência mais recente). Pessoas físicas aparecem agregadas. */
+async function parseHolders(zipPath: string, out: Map<string, { version: number; date: string; rows: { name: string; pf: boolean; pct: number; controller: boolean }[] }>) {
+  const reader = csvReader((_e, col) => {
+    if (col("ID_Acionista_Relacionado")) return; // só acionistas diretos da companhia
+    const cnpj = col("CNPJ_Companhia");
+    const version = num(col("Versao"));
+    const date = col("Data_Referencia");
+    let cur = out.get(cnpj);
+    if (!cur || date > cur.date || (date === cur.date && version > cur.version)) out.set(cnpj, (cur = { version, date, rows: [] }));
+    if (cur.date !== date || cur.version !== version) return;
+    const pct = num(col("Percentual_Total_Acoes_Circulacao"));
+    if (!Number.isFinite(pct)) return;
+    cur.rows.push({ name: col("Acionista").trim(), pf: col("Tipo_Pessoa_Acionista") === "PF", pct, controller: col("Acionista_Controlador") === "S" });
+  });
+  await eachZipLine(zipPath, (n) => /fre_cia_aberta_posicao_acionaria_\d{4}\.csv$/.test(n), reader);
+}
+
+function holdersSummary(rows: { name: string; pf: boolean; pct: number; controller: boolean }[], date: string): Governance["holders"] {
+  const isTreasury = (n: string) => /tesouraria/i.test(n);
+  const isOthers = (n: string) => /^outros$/i.test(n.trim());
+  const sum = (f: (r: (typeof rows)[number]) => boolean) => rows.filter(f).reduce((s, r) => s + r.pct, 0);
+  const controlPct = sum((r) => r.controller && !isTreasury(r.name));
+  const treasuryPct = sum((r) => isTreasury(r.name));
+  const top = rows
+    .filter((r) => !isTreasury(r.name) && !isOthers(r.name) && r.pct >= 1)
+    .map((r) => ({ name: r.pf ? "Pessoa física" : r.name, pct: r.pct, controller: r.controller }));
+  // pessoas físicas agregadas por papel (controladora ou não)
+  const merged: typeof top = [];
+  for (const r of top) {
+    const same = r.name === "Pessoa física" ? merged.find((m) => m.name === r.name && m.controller === r.controller) : undefined;
+    if (same) same.pct += r.pct;
+    else merged.push({ ...r });
+  }
+  const round = (x: number) => Math.round(x * 100) / 100;
+  return {
+    controlPct: rows.some((r) => r.controller) ? round(controlPct) : null,
+    treasuryPct: round(treasuryPct),
+    freeFloatPct: rows.length ? round(Math.max(0, 100 - controlPct - treasuryPct)) : null,
+    top: merged.sort((a, b) => b.pct - a.pct).slice(0, 6).map((r) => ({ ...r, pct: round(r.pct) })),
+    date,
+  };
+}
+
+/** Último documento DFP/ITR entregue por empresa, com o link de download na CVM. */
+async function parseDocIndex(zipPath: string, kind: "DFP" | "ITR", out: Map<string, { kind: "DFP" | "ITR"; date: string; link: string }[]>) {
+  const best = new Map<string, { version: number; date: string; link: string }>();
+  const reader = csvReader((_e, col) => {
+    const cnpj = col("CNPJ_CIA");
+    const version = num(col("VERSAO"));
+    const date = col("DT_REFER");
+    const cur = best.get(cnpj);
+    if (!cur || date > cur.date || (date === cur.date && version > cur.version)) best.set(cnpj, { version, date, link: col("LINK_DOC") });
+  });
+  await eachZipLine(zipPath, (n) => new RegExp(`^${kind.toLowerCase()}_cia_aberta_\\d{4}\\.csv$`).test(n), reader);
+  for (const [cnpj, d] of best) {
+    const list = out.get(cnpj) ?? out.set(cnpj, []).get(cnpj)!;
+    const i = list.findIndex((x) => x.kind === kind);
+    if (i < 0) list.push({ kind, date: d.date, link: d.link });
+    else if (d.date > list[i].date) list[i] = { kind, date: d.date, link: d.link };
+  }
+}
+
 // ---------- FRE: capital social e desdobramentos ----------
 interface CapitalPoint {
   date: string;
@@ -528,15 +600,31 @@ const addDays = (iso: string, d: number) => new Date(Date.parse(iso) + d * 864e5
 
 // ---------- FCA: empresas, setor e tickers ----------
 async function parseFca(zipPath: string, companies: Record<string, CompanyInfo>) {
-  const general = new Map<string, { version: number; name: string; sector: string }>();
+  const general = new Map<string, { version: number; name: string; sector: string; control: string; status: string; site: string; about: string }>();
+  const segments = new Map<string, string>();
+  const auditors = new Map<string, { version: number; list: { name: string; start: string; end: string }[] }>();
   const securities = new Map<string, { version: number; rows: { kind: string; ticker: string; comp: string }[] }>();
   const reader = csvReader((entry, col) => {
     const cnpj = col("CNPJ_Companhia");
     const version = num(col("Versao"));
     if (/fca_cia_aberta_geral_/.test(entry)) {
       const cur = general.get(cnpj);
-      if (!cur || version >= cur.version) general.set(cnpj, { version, name: col("Nome_Empresarial"), sector: col("Setor_Atividade") });
+      if (!cur || version >= cur.version)
+        general.set(cnpj, {
+          version,
+          name: col("Nome_Empresarial"),
+          sector: col("Setor_Atividade"),
+          control: col("Especie_Controle_Acionario"),
+          status: col("Situacao_Emissor"),
+          site: col("Pagina_Web"),
+          about: col("Descricao_Atividade"),
+        });
+    } else if (/fca_cia_aberta_auditor_/.test(entry)) {
+      let cur = auditors.get(cnpj);
+      if (!cur || version > cur.version) auditors.set(cnpj, (cur = { version, list: [] }));
+      if (version === cur.version) cur.list.push({ name: col("Auditor"), start: col("Data_Inicio_Atuacao_Auditor"), end: col("Data_Fim_Atuacao_Auditor") });
     } else {
+      if (col("Mercado") === "Bolsa" && col("Segmento") && /^(Ações|Units)/.test(col("Valor_Mobiliario"))) segments.set(cnpj, col("Segmento"));
       const ticker = col("Codigo_Negociacao").trim().toUpperCase();
       const kind = col("Valor_Mobiliario");
       if (!/^[A-Z0-9]{4}\d{1,2}$/.test(ticker)) return;
@@ -546,7 +634,22 @@ async function parseFca(zipPath: string, companies: Record<string, CompanyInfo>)
       if (version === cur.version) cur.rows.push({ kind, ticker, comp: col("Composicao_BDR_Unit") });
     }
   });
-  await eachZipLine(zipPath, (n) => /fca_cia_aberta_(geral|valor_mobiliario)_/.test(n), reader);
+  await eachZipLine(zipPath, (n) => /fca_cia_aberta_(geral|valor_mobiliario|auditor)_/.test(n), reader);
+
+  const govOf = (cnpj: string): Governance => {
+    const g = general.get(cnpj)!;
+    const current = auditors.get(cnpj)?.list.filter((a) => !a.end).sort((a, b) => b.start.localeCompare(a.start))[0];
+    const site = g.site.trim();
+    return {
+      segment: segments.get(cnpj) || undefined,
+      control: g.control || undefined,
+      status: g.status || undefined,
+      site: site ? (/^https?:\/\//i.test(site) ? site : `https://${site.replace(/^\/+/, "")}`) : undefined,
+      about: g.about ? g.about.replace(/\s+/g, " ").trim().slice(0, 700) : undefined,
+      auditor: current?.name || undefined,
+      auditorSince: current?.start || undefined,
+    };
+  };
 
   for (const [cnpj, sec] of securities) {
     const g = general.get(cnpj);
@@ -558,6 +661,7 @@ async function parseFca(zipPath: string, companies: Record<string, CompanyInfo>)
       sector,
       financial: FINANCIAL.test(norm(g.sector)),
       tickers: {},
+      gov: govOf(cnpj),
     };
     for (const r of sec.rows) {
       if (r.kind === "Units") c.tickers[r.ticker] = { kind: "UNIT", unitShares: parseUnit(r.comp) };
@@ -578,6 +682,7 @@ async function parseFca(zipPath: string, companies: Record<string, CompanyInfo>)
       sector: g.sector.replace(/^Emp\. Adm\. Part\. - /, "").trim() || "Outros",
       financial: FINANCIAL.test(norm(g.sector)),
       tickers: {},
+      gov: govOf(o.cnpj),
     });
     c.tickers[ticker] = ticker.endsWith("11") ? { kind: "UNIT", unitShares: o.unitShares ?? null } : { kind: ticker.endsWith("3") ? "ON" : "PN" };
   }
@@ -699,6 +804,8 @@ async function main() {
   };
   const years = pick(meta.years);
   log(`CVM: anos ${years.join(", ")}`);
+  const docs = new Map<string, { kind: "DFP" | "ITR"; date: string; link: string }[]>();
+  const holders = new Map<string, { version: number; date: string; rows: { name: string; pf: boolean; pct: number; controller: boolean }[] }>();
 
   for (const y of [lastYear - 1, lastYear]) {
     const fca = await download(`${CVM}/FCA/DADOS/fca_cia_aberta_${y}.zip`, `fca_${y}.zip`, true);
@@ -712,6 +819,8 @@ async function main() {
     if (dfp) await parseDfp(dfp, y, annual);
     const fre = await download(`${CVM}/FRE/DADOS/fre_cia_aberta_${y}.zip`, `fre_${y}.zip`, refresh);
     if (fre) await parseFre(fre, y, capital, eventsAll);
+    if (dfp && y >= lastYear - 1) await parseDocIndex(dfp, "DFP", docs);
+    if (fre && y >= lastYear - 1) await parseHolders(fre, holders);
     log(`  ${y}: DFP ${dfp ? "ok" : "ausente"}, FRE ${fre ? "ok" : "ausente"}`);
   }
   deriveSplits(capital, eventsAll);
@@ -721,6 +830,7 @@ async function main() {
   for (const y of [lastYear - 1, lastYear]) {
     const zip = await download(`${CVM}/ITR/DADOS/itr_cia_aberta_${y}.zip`, `itr_${y}.zip`, true);
     if (zip) await parseItr(zip, itr);
+    if (zip) await parseDocIndex(zip, "ITR", docs);
     log(`  ITR ${y}: ${zip ? "ok" : "ausente"}`);
   }
 
@@ -816,6 +926,16 @@ async function main() {
     writeJson("prices.json", prices);
     meta.priceYears = [...new Set([...meta.priceYears, ...priceYears])].sort();
     log(`B3 ok: ${Object.keys(prices).length} tickers`);
+  }
+
+  // governança: acionistas e documentos mais recentes
+  for (const c of Object.values(companies)) {
+    const h = holders.get(c.cnpj);
+    c.gov = {
+      ...c.gov,
+      ...(h?.rows.length ? { holders: holdersSummary(h.rows, h.date) } : {}),
+      ...(docs.get(c.cnpj)?.length ? { docs: docs.get(c.cnpj) } : {}),
+    };
   }
 
   // classes inferidas só ficam se tiverem negociação registrada

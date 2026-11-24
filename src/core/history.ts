@@ -19,6 +19,9 @@ export interface AnnualRaw {
   div?: number;
   sh?: number;
   shTreas?: number;
+  /** Fluxo de caixa operacional e de investimento (R$ mil). */
+  cfo?: number;
+  cfi?: number;
 }
 
 export type Split = [date: string, factor: number];
@@ -124,6 +127,8 @@ export function buildAnnual({ rows, splits, unitShares, monthly, dpsByYear }: An
       payout: ni !== null && ni > 0 ? div(paid, ni) : null,
       currentRatio: div(n(r.ca), n(r.cl)),
       debtToEquity: eq !== null && eq > 0 ? div(debt, eq) : null,
+      cashFromOps: n(r.cfo),
+      cashFromInvesting: n(r.cfi),
     };
   });
 }

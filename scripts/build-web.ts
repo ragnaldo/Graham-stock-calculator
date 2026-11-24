@@ -11,6 +11,7 @@ import path from "node:path";
 import { build } from "esbuild";
 import type { Company, PriceSeries, WebDataset } from "../src/core/dataset";
 import type { AnnualRaw, QuarterRaw } from "../src/core/history";
+import type { Benchmarks } from "../src/core/portfolio";
 import type { SnapshotFile } from "./update-quotes";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -32,6 +33,7 @@ function dataset(): WebDataset {
   const annual = read<Record<string, AnnualRaw[]>>("annual.json");
   const prices = read<Record<string, PriceSeries>>("prices.json");
   const quarters = read<Record<string, QuarterRaw[]>>("quarters.json");
+  const benchmarks = existsSync(path.join(DATA, "benchmarks.json")) ? read<Benchmarks>("benchmarks.json") : null;
   const meta = read<{ updatedAt?: string; lastFiscalYear?: number }>("meta.json");
 
   // só o que a interface usa: papéis da lista e empresas com algum desses papéis
@@ -63,6 +65,7 @@ function dataset(): WebDataset {
     quarters: Object.fromEntries(Object.entries(quarters).filter(([c]) => cnpjs.has(c))),
     prices: usedPrices,
     extras: snap.extras,
+    benchmarks,
   };
 }
 

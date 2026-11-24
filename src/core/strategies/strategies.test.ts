@@ -165,3 +165,40 @@ describe("triagem", () => {
     expect(any[0].pass).toBe(true);
   });
 });
+
+describe("Bazin", () => {
+  it("usa o menor entre proventos médios e 12 meses e divide por 6%", () => {
+    // 12 meses: DY 6% × R$ 20 = R$ 1,20; histórico: R$ 50 mi / 100 mi ações = R$ 0,50
+    const r = run(stock(), "bazin");
+    expect(r.fairValue).toBeCloseTo(0.5 / 0.06);
+    expect(r.pass).toBe(false); // R$ 20 > teto R$ 8,33
+    const cheap = run(stock({ price: 5, dy: 0.24 }), "bazin");
+    expect(cheap.criteria.map((c) => c.pass)).toEqual([true, true, true]);
+  });
+
+  it("reprova dívida alta e pagamentos interrompidos", () => {
+    const h = stock().history!;
+    const r = run(stock({ divPatrim: 1.8, history: { ...h, dividends: h.dividends.map((v, i) => (i === 8 ? 0 : v)) } }), "bazin");
+    expect(r.criteria.find((c) => c.id === "debt")!.pass).toBe(false);
+    expect(r.criteria.find((c) => c.id === "constancy")!.pass).toBe(false);
+  });
+});
+
+describe("oportunidades", () => {
+  it("lista só papéis líquidos, lucrativos e com margem, do melhor para o pior", async () => {
+    const { findOpportunities } = await import("../opportunities");
+    const good = stock({ ticker: "BOMM3", cnpj: "1", price: 20, liq2m: 5e6 });
+    const better = stock({ ticker: "OTIM3", cnpj: "2", price: 9, liq2m: 5e6 });
+    const pricey = stock({ ticker: "CARO3", cnpj: "3", price: 40, liq2m: 5e6 });
+    const illiquid = stock({ ticker: "RARO3", cnpj: "4", price: 9, liq2m: 1e4 });
+    const loss = stock({ ticker: "PREJ3", cnpj: "5", price: 9, lpa: -1, liq2m: 5e6 });
+    const rj = stock({ ticker: "RJRJ3", cnpj: "6", price: 9, liq2m: 5e6 });
+    const out = findOpportunities([good, better, pricey, illiquid, loss, rj], {
+      minLiquidity: 1e6,
+      limit: 10,
+      statusOf: (s) => (s.ticker === "RJRJ3" ? "Em Recuperação Judicial ou Equivalente" : "Fase Operacional"),
+    });
+    expect(out.map((o) => o.stock.ticker)).toEqual(["OTIM3", "BOMM3"]);
+    expect(out[0].reasons[0]).toMatch(/abaixo do Nº de Graham/);
+  });
+});

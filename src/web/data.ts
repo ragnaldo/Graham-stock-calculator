@@ -3,7 +3,9 @@
 // - Atualizar: 1) baixa a base mais recente publicada pelo workflow no GitHub Pages
 //   (indicadores do Fundamentus e balanços anuais/trimestrais da CVM, coletados todo dia útil);
 //   2) aplica as cotações ao vivo da brapi.
-import { buildDetail, indexDataset, repriceSnapshot, toRow, type WebDataset } from "@/core/dataset";
+import { buildDetail, indexDataset, repriceSnapshot, toRow, type Company, type WebDataset } from "@/core/dataset";
+import { splitFactorAfter } from "@/core/history";
+import type { Benchmarks, PortfolioContext } from "@/core/portfolio";
 import type { StockDetail, StocksPayload } from "@/core/types";
 
 declare const __DATA_URL__: string;
@@ -106,7 +108,28 @@ export interface RefreshResult {
  * Atualizar: fundamentos mais recentes publicados + cotações ao vivo.
  * Rejeita só quando nada pôde ser atualizado.
  */
+// ---------- aviso de dados novos para as telas ----------
+let version = 0;
+const listeners = new Set<() => void>();
+export const dataVersion = () => version;
+export function subscribeData(fn: () => void) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+function changed() {
+  version++;
+  listeners.forEach((fn) => fn());
+}
+
 export async function refreshAll(): Promise<RefreshResult> {
+  try {
+    return await refreshInner();
+  } finally {
+    changed();
+  }
+}
+
+async function refreshInner(): Promise<RefreshResult> {
   // em sequência: as cotações ao vivo valem sobre a base que acabou de chegar
   const settle = <T,>(p: Promise<T>) => p.then((value) => ({ status: "fulfilled" as const, value }), (reason: unknown) => ({ status: "rejected" as const, reason }));
   const f = await settle(refreshFundamentals());
@@ -136,4 +159,36 @@ export function getDetail(ticker: string): StockDetail | null {
   if (!row) return null;
   const detail = buildDetail(row, ds.extras[ticker] ?? null, tickerData(ticker));
   return { ...detail, updatedAt: ds.quotesAt };
+}
+
+export const getBenchmarks = (): Benchmarks | null => ds.benchmarks ?? null;
+export const getCompany = (ticker: string): Company | null => tickerData(ticker)?.company ?? null;
+
+/** Papéis para escolher na carteira: código, nome e cotação atual. */
+export function tickerOptions(): { ticker: string; name: string | null; price: number }[] {
+  return getStocks().stocks.map((s) => ({ ticker: s.ticker, name: s.name, price: s.price }));
+}
+
+/** Fechamento mensal do papel no mês da data (base da época), para sugerir o preço de uma compra antiga. */
+export function priceOn(ticker: string, date: string): number | null {
+  const td = tickerData(ticker);
+  return td?.monthly[date.slice(0, 7)] ?? null;
+}
+
+export function portfolioContext(today = new Date().toISOString().slice(0, 10)): PortfolioContext {
+  const rows = new Map(getStocks().stocks.map((s) => [s.ticker, s]));
+  return {
+    today,
+    price: (t) => rows.get(t)?.price ?? null,
+    splits: (t) => tickerData(t)?.splits ?? [],
+    dividends: (t) => {
+      const raw = ds.extras[t]?.d;
+      if (!raw) return [];
+      const splits = tickerData(t)?.splits ?? [];
+      return raw.map(([date, , value]) => ({ date, value: value / splitFactorAfter(splits, date) }));
+    },
+    monthly: (t) => tickerData(t)?.monthly ?? {},
+    name: (t) => rows.get(t)?.name ?? null,
+    sector: (t) => rows.get(t)?.sector ?? null,
+  };
 }

@@ -7,7 +7,8 @@
     "data:update": "tsx scripts/update-data.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "data:quotes": "tsx scripts/update-quotes.ts"
+    "data:quotes": "tsx scripts/update-quotes.ts",
+    "data:benchmarks": "tsx scripts/update-benchmarks.ts"
   },
   "dependencies": {
     "react": "19.3.0",

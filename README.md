@@ -20,6 +20,14 @@ os dados embutidos.
 
 ## O que tem
 
+- **Minha carteira**: cadastre compras e vendas (papel, data, quantidade, preço, taxas). Calcula preço médio,
+  corrige desdobramentos, soma proventos pela data com e compara a rentabilidade com Ibovespa e CDI simulando os
+  mesmos aportes nas mesmas datas. As operações ficam no navegador; use **Exportar backup** para guardar uma cópia.
+- **Oportunidades**: empresas lucrativas e em operação normal, abaixo do Número de Graham ou do teto de Bazin e com
+  4+ critérios do investidor defensivo, ordenadas por nota. Triagem para estudo, não recomendação.
+- **Análise completa** na página de cada papel: preço teto central, rentabilidade, crescimento, endividamento,
+  dividendos, caixa, governança (segmento, controle, auditor, acionistas) e links para os documentos na CVM.
+
 - **Lista** com todos os papéis, filtros por estratégia, busca, setor e ordenação.
 - **Página do papel** (clique na linha): indicadores atuais, análise critério a critério, gráficos e tabela anual
   (cotação, P/L, P/VP, DY, LPA, VPA, proventos, receita, lucro, ROE, dívida) e proventos pagos.
@@ -28,6 +36,7 @@ os dados embutidos.
   - Investidor defensivo — os 7 critérios do cap. 14 de *O Investidor Inteligente*
   - Fórmula de crescimento — V = LPA × (8,5 + 2g) × 4,4 / Y
   - Net-net (NCAV) — cotação ≤ 2/3 do ativo circulante líquido
+  - Preço teto de Bazin — proventos por ação ÷ 6%
   - Filtro por indicadores — regras livres (ROE ≥ x, dívida/patrimônio ≤ y…)
 
 ## Dados
@@ -38,6 +47,8 @@ os dados embutidos.
 | Indicadores atuais, balanço recente, proventos por ação | Fundamentus | `npm run data:quotes` (≈ 30 s) |
 | Balanços anuais desde 2010, nº de ações, desdobramentos | CVM Dados Abertos (DFP, FRE, FCA) | `npm run data:update` |
 | Cotações históricas mensais | B3 (COTAHIST) | `npm run data:update` |
+| Governança: segmento, controle, auditor, acionistas, documentos | CVM (FCA, FRE, índices DFP/ITR) | `npm run data:update` |
+| CDI e Ibovespa diários | Banco Central (SGS 12) e B3 | `npm run data:benchmarks` |
 
 Depois de atualizar os dados, gere o HTML de novo:
 

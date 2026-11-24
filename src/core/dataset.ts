@@ -1,6 +1,7 @@
 // Formato da base embutida no HTML e montagem das linhas/detalhes a partir dela.
 // TypeScript puro: roda no navegador (app web) e no Node (testes e scripts).
 import { adjustPrices, buildAnnual, buildQuarters, buildTtm, splitFactorAfter, summarize, type AnnualRaw, type QuarterRaw, type Split } from "./history";
+import type { Benchmarks } from "./portfolio";
 import type { DividendEvent, Snapshot, StockDetail, StockRow } from "./types";
 
 export interface Company {
@@ -9,6 +10,20 @@ export interface Company {
   sector: string;
   financial: boolean;
   tickers: Record<string, { kind: "ON" | "PN" | "UNIT"; unitShares?: number | null }>;
+  gov?: Governance;
+}
+
+/** Governança e documentos (cadastro FCA, formulário de referência e índices DFP/ITR da CVM). */
+export interface Governance {
+  segment?: string;
+  control?: string;
+  status?: string;
+  site?: string;
+  about?: string;
+  auditor?: string;
+  auditorSince?: string;
+  holders?: { controlPct: number | null; treasuryPct: number | null; freeFloatPct: number | null; top: { name: string; pct: number; controller: boolean }[]; date: string };
+  docs?: { kind: "DFP" | "ITR"; date: string; link: string }[];
 }
 
 export interface PriceSeries {
@@ -44,6 +59,8 @@ export interface WebDataset {
   quarters: Record<string, QuarterRaw[]>;
   prices: Record<string, PriceSeries>;
   extras: Record<string, TickerExtra>;
+  /** CDI e Ibovespa diários, para comparar a carteira. */
+  benchmarks?: Benchmarks | null;
 }
 
 export interface TickerData {
@@ -171,6 +188,7 @@ export function buildDetail(row: StockRow, extra: TickerExtra | null, data: Tick
     dividends,
     dividendsByYear: [...byYear.entries()].sort((a, b) => a[0] - b[0]).map(([year, value]) => ({ year, value })),
     splits: splits.map(([date, factor]) => ({ date, factor })),
+    gov: data?.company.gov ?? null,
     warnings,
   };
 }

@@ -3,9 +3,11 @@ import { fmtCompact, fmtDate, fmtDateTime, fmtInt, fmtMultiple, fmtNumber, fmtPc
 import { STRATEGIES, defaultParams, runStrategy, type StrategyResult } from "@/core/strategies";
 import type { AnnualPoint, QuarterPoint, StockDetail as Detail } from "@/core/types";
 import { useConfig } from "@/lib/useConfig";
-import { getDetail, getStocks, refreshAll } from "@/web/data";
+import { getDetail, getStocks } from "@/web/data";
+import { useDataVersion } from "@/web/hooks";
+import { FullAnalysis } from "./FullAnalysis";
 import { Chart } from "./charts";
-import { Button, Card, Margin, Spinner, VerdictBadge, VerdictIcon } from "./ui";
+import { Button, Card, Margin, VerdictBadge, VerdictIcon } from "./ui";
 
 type Payload = Detail;
 
@@ -109,25 +111,10 @@ const ANNUAL_COLUMNS: { label: string; title?: string; get: (a: AnnualPoint) => 
 
 export function StockDetail({ ticker }: { ticker: string }) {
   const [config] = useConfig();
-  const [data, setData] = useState<Payload | null>(() => getDetail(ticker));
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const version = useDataVersion();
+  const data = useMemo<Payload | null>(() => getDetail(ticker), [ticker, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const [range, setRange] = useState<(typeof RANGES)[number]["id"]>("10a");
   const [allDividends, setAllDividends] = useState(false);
-
-  const refresh = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await refreshAll();
-      setData(getDetail(ticker));
-      if (r.warning) setError(r.warning.replace(/^Não atualizou: /, ""));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // todas as estratégias de Graham, com os parâmetros salvos na triagem
   const analysis = useMemo(() => {
@@ -151,19 +138,6 @@ export function StockDetail({ ticker }: { ticker: string }) {
     return jan.filter((_, i) => i % step === 0);
   }, [prices]);
 
-  if (error && !data)
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p role="alert" className="text-bad">
-          {error}
-        </p>
-        <p className="mt-4">
-          <a href="#" className="text-accent underline">
-            Voltar à lista
-          </a>
-        </p>
-      </div>
-    );
   if (!data)
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 text-center">
@@ -202,7 +176,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
     <div className="mx-auto max-w-[1300px] px-4 pb-16">
       <nav className="py-4 text-sm">
         <a href="#" className="text-accent hover:underline">
-          ← Todas as ações
+          ← Voltar às ações
         </a>
       </nav>
 
@@ -218,18 +192,12 @@ export function StockDetail({ ticker }: { ticker: string }) {
             <div className="num text-3xl font-semibold tracking-tight">{fmtPrice(row.price)}</div>
             <div className="text-xs text-ink-3">{quotes.live ? `cotação de ${fmtDateTime(quotes.updatedAt)}` : `fechamento de ${fmtDate(info.lastQuoteDate)}`}</div>
           </div>
-          <Button variant="primary" onClick={refresh} disabled={busy} title="Busca os fundamentos mais recentes publicados e a cotação do momento">
-            {busy ? <Spinner /> : <span aria-hidden>↻</span>}
-            Atualizar
-          </Button>
+          <a href="#carteira" className="hidden rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-2 sm:inline-flex">
+            Carteira
+          </a>
         </div>
       </header>
 
-      {error && (
-        <p role="alert" className="mb-4 rounded-lg border border-bad/40 bg-bad-soft px-4 py-3 text-sm text-bad">
-          Não foi possível atualizar: {error}
-        </p>
-      )}
       {data.warnings.length > 0 && (
         <ul role="status" className="mb-4 space-y-1 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn">
           {data.warnings.map((w) => (
@@ -251,7 +219,9 @@ export function StockDetail({ ticker }: { ticker: string }) {
         </dl>
       </Card>
 
-      <h2 className="mb-3 text-lg font-semibold">Análise pelas estratégias</h2>
+      <FullAnalysis detail={data} results={analysis} />
+
+      <h2 className="mb-3 text-lg font-semibold">Critérios por estratégia</h2>
       <div className="mb-8 grid gap-4 lg:grid-cols-2">
         {analysis.map(({ strategy, result }) => (
           <StrategyCard key={strategy.id} name={strategy.name} description={strategy.description} result={result} />
