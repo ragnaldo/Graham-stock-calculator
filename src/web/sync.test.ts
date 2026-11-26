@@ -38,3 +38,21 @@ describe("linhas da planilha", () => {
     expect(r.skipped).toBe(2);
   });
 });
+
+describe("link pessoal", () => {
+  it("leva endereço e chave no fragmento e volta igual", async () => {
+    const { personalLink, parseLink } = await import("./sync");
+    const cfg = { url: "https://script.google.com/macros/s/AKfy-x_1/exec", key: "chave çom acento+/=" };
+    const link = personalLink(cfg, "https://ragnaldo.github.io/Graham-stock-calculator/");
+    expect(link).toMatch(/^https:\/\/ragnaldo\.github\.io\/Graham-stock-calculator\/#conectar=[A-Za-z0-9_-]+$/);
+    expect(parseLink(new URL(link).hash)).toEqual(cfg);
+  });
+
+  it("recusa links que não apontam para um script do Google", async () => {
+    const { parseLink } = await import("./sync");
+    const bad = btoa(JSON.stringify({ u: "https://evil.example/exec", k: "x" }));
+    expect(parseLink(`#conectar=${bad}`)).toBeNull();
+    expect(parseLink("#carteira")).toBeNull();
+    expect(parseLink("#conectar=%%%")).toBeNull();
+  });
+});

@@ -2,6 +2,11 @@
 // O endereço do app da Web e a chave ficam neste navegador; as operações, na planilha.
 import { newId, type Operation } from "@/core/portfolio";
 
+declare const __DATA_URL__: string;
+
+/** Endereço público do site, base do link pessoal (funciona mesmo abrindo o arquivo baixado). */
+export const SITE_URL = typeof __DATA_URL__ === "string" ? __DATA_URL__.replace(/data\.json$/, "") : "https://ragnaldo.github.io/Graham-stock-calculator/";
+
 const CONFIG_KEY = "graham:sheets:v1";
 const DIRTY_KEY = "graham:sheets:dirty";
 /** Lista como estava na última sincronização bem-sucedida (base da junção). */
@@ -12,7 +17,43 @@ export interface SheetsConfig {
   key: string;
   /** Link para abrir a planilha, devolvido pelo script. */
   sheetUrl?: string;
+  /** Versão do script na planilha (1 = sem a aba com o link pessoal). */
+  scriptVersion?: number;
 }
+
+// ---------- link pessoal: endereço e chave no fragmento (#), que o navegador não envia a servidor nenhum ----------
+const b64url = (s: string) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s: string) => {
+  const b = s.replace(/-/g, "+").replace(/_/g, "/");
+  return decodeURIComponent(escape(atob(b + "=".repeat((4 - (b.length % 4)) % 4))));
+};
+
+/** Link que conecta qualquer navegador à planilha, sem colar endereço nem chave. */
+export function personalLink(cfg: Pick<SheetsConfig, "url" | "key">, site = SITE_URL): string {
+  return `${site}#conectar=${b64url(JSON.stringify({ u: cfg.url, k: cfg.key }))}`;
+}
+
+/** Lê o fragmento "conectar=..." de um link pessoal; null se não for um. */
+export function parseLink(hash: string): { url: string; key: string } | null {
+  const m = /(?:^|#)conectar=([A-Za-z0-9_\-=+/]+)/.exec(hash);
+  if (!m) return null;
+  try {
+    const o = JSON.parse(unb64url(m[1])) as { u?: unknown; k?: unknown };
+    if (typeof o.u !== "string" || typeof o.k !== "string" || !validUrl(o.u) || !o.k) return null;
+    return { url: o.u, key: o.k };
+  } catch {
+    return null;
+  }
+}
+
+let pendingLink: { url: string; key: string } | null = null;
+/** Guardado ao abrir o site por um link pessoal; a tela da carteira conecta sozinha. */
+export const setPendingLink = (l: { url: string; key: string } | null) => (pendingLink = l);
+export const takePendingLink = () => {
+  const l = pendingLink;
+  pendingLink = null;
+  return l;
+};
 
 export type SyncState =
   | { status: "off" }
@@ -66,6 +107,7 @@ interface Reply {
   erro?: string;
   operacoes?: unknown[];
   planilha?: string;
+  versao?: number;
 }
 
 async function call(cfg: SheetsConfig, body?: unknown): Promise<Reply> {
@@ -157,7 +199,7 @@ const now = () => new Date().toISOString();
  */
 async function save(cfg: SheetsConfig, list: Operation[]) {
   try {
-    await call(cfg, { chave: cfg.key, operacoes: list });
+    await call(cfg, { chave: cfg.key, operacoes: list, link: personalLink(cfg) });
   } catch (e) {
     const check = await call(cfg).catch(() => null);
     const stored = check ? fromSheet(check.operacoes ?? []).ops : null;
@@ -177,8 +219,8 @@ export async function pull(): Promise<{ ops: Operation[]; skipped: number }> {
   set({ status: "loading" });
   try {
     const reply = await call(config);
-    if (reply.planilha && reply.planilha !== config.sheetUrl) {
-      config = { ...config, sheetUrl: reply.planilha };
+    if ((reply.planilha && reply.planilha !== config.sheetUrl) || (reply.versao ?? 1) !== config.scriptVersion) {
+      config = { ...config, sheetUrl: reply.planilha ?? config.sheetUrl, scriptVersion: reply.versao ?? 1 };
       write(CONFIG_KEY, config);
     }
     const result = fromSheet(reply.operacoes ?? []);
@@ -251,7 +293,7 @@ export async function connect(cfg: SheetsConfig): Promise<{ ops: Operation[]; sk
   if (!validUrl(clean.url)) throw new Error("o endereço precisa ser o do app da Web do Google, começando com https://script.google.com/");
   if (!clean.key) throw new Error("informe a chave definida no script");
   const reply = await call(clean);
-  config = { ...clean, sheetUrl: reply.planilha };
+  config = { ...clean, sheetUrl: reply.planilha, scriptVersion: reply.versao ?? 1 };
   write(CONFIG_KEY, config);
   const result = fromSheet(reply.operacoes ?? []);
   setBase(result.ops);

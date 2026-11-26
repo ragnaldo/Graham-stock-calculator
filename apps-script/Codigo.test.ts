@@ -5,9 +5,7 @@ import { describe, expect, it } from "vitest";
 
 type Cell = string | number | Date;
 
-function google(rows: Cell[][] = []) {
-  const sheet: Cell[][] = rows.map((r) => [...r]);
-  let exists = rows.length > 0;
+function makeTab(sheet: Cell[][], formulas: Map<string, string>) {
   const range = (r: number, c: number, nr: number, nc: number) => ({
     getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => sheet[r - 1 + i]?.[c - 1 + j] ?? "")),
     setValues: (v: Cell[][]) => v.forEach((row, i) => row.forEach((x, j) => ((sheet[r - 1 + i] ??= [])[c - 1 + j] = x))),
@@ -16,8 +14,10 @@ function google(rows: Cell[][] = []) {
       for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) if (sheet[r - 1 + i]) sheet[r - 1 + i][c - 1 + j] = "";
     },
     setNumberFormat: () => undefined,
+    getFormula: () => formulas.get(`${r},${c}`) ?? "",
+    setFormula: (f: string) => formulas.set(`${r},${c}`, f),
   });
-  const tab = {
+  return {
     getLastRow: () => {
       let last = 0;
       sheet.forEach((r, i) => r.some((x) => x !== "" && x !== undefined) && (last = i + 1));
@@ -27,10 +27,26 @@ function google(rows: Cell[][] = []) {
     appendRow: (r: Cell[]) => sheet.push(r),
     setFrozenRows: () => undefined,
   };
+}
+
+function google(rows: Cell[][] = []) {
+  const sheet: Cell[][] = rows.map((r) => [...r]);
+  const tabs = new Map<string, ReturnType<typeof makeTab>>();
+  const linkSheet: Cell[][] = [];
+  const formulas = new Map<string, string>();
+  if (rows.length) tabs.set("Operações", makeTab(sheet, new Map()));
   let uid = 0;
   const env = {
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => ({ getSheetByName: () => (exists ? tab : null), insertSheet: () => ((exists = true), tab), getUrl: () => "https://docs.google.com/spreadsheets/d/x" }),
+      getActiveSpreadsheet: () => ({
+        getSheetByName: (n: string) => tabs.get(n) ?? null,
+        insertSheet: (n: string) => {
+          const t = n === "Operações" ? makeTab(sheet, new Map()) : makeTab(linkSheet, formulas);
+          tabs.set(n, t);
+          return t;
+        },
+        getUrl: () => "https://docs.google.com/spreadsheets/d/x",
+      }),
     },
     ContentService: { createTextOutput: (s: string) => ({ setMimeType: () => s }), MimeType: { JSON: "json" } },
     LockService: { getScriptLock: () => ({ waitLock: () => undefined, releaseLock: () => undefined }) },
@@ -47,6 +63,9 @@ function google(rows: Cell[][] = []) {
   };
   return {
     sheet,
+    linkSheet,
+    formulas,
+    tabs,
     get: (chave: string) => JSON.parse(api.doGet({ parameter: { chave } })),
     post: (body: unknown) => JSON.parse(api.doPost({ postData: { contents: JSON.stringify(body) } })),
   };
@@ -60,7 +79,7 @@ const ops = [
 describe("script da planilha", () => {
   it("grava e lê de volta, criando a aba na primeira vez", () => {
     const g = google();
-    expect(g.post({ chave: "segredo", operacoes: ops })).toEqual({ ok: true, total: 2 });
+    expect(g.post({ chave: "segredo", operacoes: ops })).toEqual({ ok: true, versao: 2, total: 2 });
     expect(g.sheet[0]).toEqual(["id", "Data", "Papel", "Operação", "Quantidade", "Preço", "Taxas"]);
     expect(g.sheet[1][3]).toBe("Compra");
     const r = g.get("segredo");
@@ -97,5 +116,17 @@ describe("script da planilha", () => {
     g.post({ chave: "segredo", operacoes: ops });
     g.post({ chave: "segredo", operacoes: [ops[0]] });
     expect(g.get("segredo").operacoes.map((o: { id: string }) => o.id)).toEqual(["a1"]);
+  });
+
+  it("grava o link pessoal na aba Calculadora e devolve a versão", () => {
+    const g = google();
+    const link = "https://ragnaldo.github.io/Graham-stock-calculator/#conectar=eyJ1Ijoi";
+    expect(g.post({ chave: "segredo", operacoes: ops, link }).versao).toBe(2);
+    expect(g.formulas.get("3,1")).toBe(`=HYPERLINK("${link}";"Abrir a Calculadora Graham conectada")`);
+    expect(g.get("segredo").versao).toBe(2);
+    // link malformado (ex.: com aspas) não é gravado
+    const g2 = google();
+    g2.post({ chave: "segredo", operacoes: [], link: 'https://x.com/"); =IMPORTDATA("#conectar=a' });
+    expect(g2.tabs.has("Calculadora")).toBe(false);
   });
 });

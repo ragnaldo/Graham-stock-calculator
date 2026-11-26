@@ -7,18 +7,23 @@
  *     Executar como: Eu. Quem pode acessar: Qualquer pessoa.
  *  3. Autorize o acesso à planilha e copie o endereço do app da Web (termina em /exec).
  *
- * Quem tiver o endereço e a chave consegue ler e alterar a aba "Operações". Não divulgue os dois juntos.
+ * Depois de conectar, a aba "Calculadora" desta planilha guarda o seu link pessoal: abra-o em qualquer
+ * navegador ou celular para usar a carteira sem colar endereço nem chave.
+ *
+ * Quem tiver o endereço e a chave (ou o link pessoal) consegue ler e alterar a aba "Operações". Não divulgue.
  */
 var CHAVE = "troque-esta-chave";
 
+var VERSAO = 2;
 var ABA = "Operações";
+var ABA_LINK = "Calculadora";
 var COLUNAS = ["id", "Data", "Papel", "Operação", "Quantidade", "Preço", "Taxas"];
 
 /** Lê as operações. */
 function doGet(e) {
   return responder(function () {
     verificar(e && e.parameter ? e.parameter.chave : "");
-    return { ok: true, operacoes: ler(), planilha: SpreadsheetApp.getActiveSpreadsheet().getUrl() };
+    return { ok: true, versao: VERSAO, operacoes: ler(), planilha: SpreadsheetApp.getActiveSpreadsheet().getUrl() };
   });
 }
 
@@ -32,10 +37,11 @@ function doPost(e) {
     trava.waitLock(10000);
     try {
       gravar(corpo.operacoes);
+      if (corpo.link) gravarLink(String(corpo.link));
     } finally {
       trava.releaseLock();
     }
-    return { ok: true, total: corpo.operacoes.length };
+    return { ok: true, versao: VERSAO, total: corpo.operacoes.length };
   });
 }
 
@@ -104,6 +110,20 @@ function gravar(ops) {
   });
   a.getRange(2, 1, linhas.length, COLUNAS.length).setValues(linhas);
   a.getRange(2, 2, linhas.length, 1).setNumberFormat("dd/mm/yyyy");
+}
+
+/** Aba "Calculadora" com o link pessoal, para abrir a carteira conectada em qualquer aparelho. */
+function gravarLink(link) {
+  if (!/^https:\/\/[^\s"]+#conectar=[A-Za-z0-9_\-]+$/.test(link)) return;
+  var planilha = SpreadsheetApp.getActiveSpreadsheet();
+  var a = planilha.getSheetByName(ABA_LINK);
+  if (!a) a = planilha.insertSheet(ABA_LINK);
+  var formula = '=HYPERLINK("' + link + '";"Abrir a Calculadora Graham conectada")';
+  if (a.getRange(3, 1).getFormula() === formula) return;
+  a.getRange(1, 1).setValue("Calculadora Graham B3");
+  a.getRange(3, 1).setFormula(formula);
+  a.getRange(5, 1).setValue("Clique no link em qualquer navegador ou celular: a carteira abre já conectada a esta planilha.");
+  a.getRange(6, 1).setValue("Não compartilhe este link: ele dá acesso às suas operações. Para trocar, mude a CHAVE no Apps Script e conecte de novo.");
 }
 
 /** Data da planilha (Date, "dd/mm/aaaa" ou "aaaa-mm-dd") para "aaaa-mm-dd". */

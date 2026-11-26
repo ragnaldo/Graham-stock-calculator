@@ -332,7 +332,7 @@ export function Portfolio() {
       ) : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi label="Patrimônio" value={brl(summary.value)} sub={<span className="text-ink-3">{summary.positions.length} posições</span>} />
+            <Kpi label="Patrimônio" value={brl(summary.value)} sub={<span className="text-ink-3">{summary.positions.length} {summary.positions.length === 1 ? "posição" : "posições"}</span>} />
             <Kpi label="Total aportado" value={brl(summary.contributed)} sub={summary.withdrawn > 0 ? <span className="text-ink-3">{brl(summary.withdrawn)} recebidos em vendas</span> : <span className="text-ink-3">desde {fmtDate(summary.firstDate)}</span>} />
             <Kpi
               label="Resultado"

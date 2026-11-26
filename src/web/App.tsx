@@ -4,11 +4,19 @@ import { Opportunities } from "@/components/Opportunities";
 import { Portfolio } from "@/components/Portfolio";
 import { Screener } from "@/components/Screener";
 import { StockDetail } from "@/components/StockDetail";
+import { parseLink, setPendingLink } from "./sync";
 
 const TICKER = /^[A-Z0-9]{4}\d{1,2}$/;
 
-/** Rotas por hash: "#" ações, "#carteira", "#oportunidades", "#PETR4" página do papel. */
-function route(): { view: View; ticker: string | null } {
+/** Rotas por hash: "#" ações, "#carteira", "#oportunidades", "#PETR4" página do papel, "#conectar=…" link pessoal. */
+function route(): { view: View; ticker: string | null; linkAt?: number } {
+  const link = parseLink(location.hash);
+  if (link) {
+    // guarda para a carteira conectar e tira endereço e chave da barra e do histórico
+    setPendingLink(link);
+    history.replaceState(null, "", `${location.pathname}${location.search}#carteira`);
+    return { view: "carteira", ticker: null, linkAt: Date.now() };
+  }
   const h = decodeURIComponent(location.hash.slice(1));
   if (h === "carteira") return { view: "carteira", ticker: null };
   if (h === "oportunidades") return { view: "oportunidades", ticker: null };
@@ -38,7 +46,7 @@ export function App() {
       <div hidden={r.view !== "acoes"}>
         <Screener />
       </div>
-      {r.view === "carteira" && <Portfolio />}
+      {r.view === "carteira" && <Portfolio key={r.linkAt ?? "carteira"} />}
       {r.view === "oportunidades" && <Opportunities />}
       {r.ticker && <StockDetail key={r.ticker} ticker={r.ticker} />}
     </>

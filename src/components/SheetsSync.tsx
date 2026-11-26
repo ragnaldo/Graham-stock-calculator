@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import script from "../../apps-script/Codigo.gs";
 import type { Operation } from "@/core/portfolio";
 import { applyRemote, currentOperations, syncOnOpen, useSyncState } from "@/web/hooks";
-import { connect, disconnect, getSheetsConfig, pushNow } from "@/web/sync";
+import qrcode from "qrcode-generator";
+import { connect, disconnect, getSheetsConfig, personalLink, pushNow, takePendingLink } from "@/web/sync";
 import { Button, Card, Spinner } from "./ui";
 
 const randomKey = () => {
@@ -26,12 +27,54 @@ function draftKey() {
 const time = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 const own = (ops: Operation[]) => ops.filter((o) => !o.id.startsWith("exemplo-"));
 
+/** Copia para a área de transferência; se o navegador não deixar, seleciona o texto do elemento. */
+async function copyText(text: string, el: HTMLElement | null) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const sel = window.getSelection();
+    if (sel && el) {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    return false;
+  }
+}
+
+const withKey = (key: string) =>
+  script
+    .replace(" *  1. Troque a CHAVE abaixo por uma senha só sua (ela vai no app junto com o endereço).", " *  1. A CHAVE abaixo já veio preenchida pela calculadora (é a mesma do app).")
+    .replace('var CHAVE = "troque-esta-chave";', `var CHAVE = "${key.replace(/["\\]/g, "")}";`);
+
+/** QR code em SVG (desenhado aqui, sem depender de serviço externo). */
+function QrCode({ text, size = 176 }: { text: string; size?: number }) {
+  const path = useMemo(() => {
+    const qr = qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    const n = qr.getModuleCount();
+    let d = "";
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + 2} ${r + 2}h1v1h-1z`;
+    return { d, n: n + 4 };
+  }, [text]);
+  return (
+    <svg viewBox={`0 0 ${path.n} ${path.n}`} width={size} height={size} role="img" aria-label="QR code do link pessoal" className="rounded-lg border border-line" shapeRendering="crispEdges">
+      <rect width={path.n} height={path.n} fill="#ffffff" />
+      <path d={path.d} fill="#000000" />
+    </svg>
+  );
+}
+
 /** Card de conexão com o Google Planilhas na tela da carteira. */
 export function SheetsSync() {
   const state = useSyncState();
   const cfg = getSheetsConfig();
-  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"closed" | "existing" | "new">("closed");
   const [url, setUrl] = useState("");
+  const [existingKey, setExistingKey] = useState("");
   const [key, setKeyState] = useState(draftKey);
   const setKey = (k: string) => {
     setKeyState(k);
@@ -44,62 +87,56 @@ export function SheetsSync() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [choice, setChoice] = useState<{ remote: Operation[]; local: Operation[] } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [share, setShare] = useState(false);
   const codeRef = useRef<HTMLPreElement>(null);
-  const code = useMemo(
-    () =>
-      script
-        .replace(" *  1. Troque a CHAVE abaixo por uma senha só sua (ela vai no app junto com o endereço).", " *  1. A CHAVE abaixo já veio preenchida pela calculadora (é a mesma do app).")
-        .replace('var CHAVE = "troque-esta-chave";', `var CHAVE = "${key.replace(/["\\]/g, "")}";`),
-    [key],
-  );
+  const linkRef = useRef<HTMLParagraphElement>(null);
+  const code = useMemo(() => withKey(key), [key]);
 
-  // ao abrir a carteira, traz a planilha (ou envia alterações pendentes)
-  useEffect(() => {
-    syncOnOpen()
-      .then((r) => r && r.skipped > 0 && setMsg({ ok: false, text: `${r.skipped} linhas da planilha foram ignoradas por estarem incompletas (papel, data, quantidade e preço são obrigatórios).` }))
-      .catch(() => undefined); // o estado já mostra o erro
-  }, []);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      // sem acesso à área de transferência: seleciona o texto para copiar à mão
-      const sel = window.getSelection();
-      if (sel && codeRef.current) {
-        const r = document.createRange();
-        r.selectNodeContents(codeRef.current);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      }
-    }
+  const flash = (what: string) => {
+    setCopied(what);
+    setTimeout(() => setCopied(null), 2500);
   };
 
-  const doConnect = async () => {
+  const doConnect = async (target: { url: string; key: string }, via: "link" | "form") => {
     setBusy(true);
     setMsg(null);
     try {
-      const { ops: remote, skipped } = await connect({ url, key });
+      const { ops: remote, skipped } = await connect(target);
       const local = own(currentOperations());
       const note = skipped ? ` ${skipped} linhas incompletas da planilha foram ignoradas.` : "";
+      const intro = via === "link" ? "Conectado pelo seu link pessoal." : "Conectado.";
       if (!remote.length) {
         if (local.length) await pushNow(local);
-        setMsg({ ok: true, text: local.length ? `Conectado. ${local.length} ${local.length === 1 ? "operação deste navegador foi enviada" : "operações deste navegador foram enviadas"} para a planilha.${note}` : `Conectado. A planilha está vazia: as próximas operações vão para lá.${note}` });
+        else await pushNow([]); // grava o link pessoal na planilha (script versão 2)
+        setMsg({ ok: true, text: local.length ? `${intro} ${local.length} ${local.length === 1 ? "operação deste navegador foi enviada" : "operações deste navegador foram enviadas"} para a planilha.${note}` : `${intro} A planilha está vazia: as próximas operações vão para lá.${note}` });
       } else if (!local.length) {
         applyRemote(remote);
-        setMsg({ ok: true, text: `Conectado. ${remote.length} ${remote.length === 1 ? "operação carregada" : "operações carregadas"} da planilha.${note}` });
+        setMsg({ ok: true, text: `${intro} ${remote.length} ${remote.length === 1 ? "operação carregada" : "operações carregadas"} da planilha.${note}` });
       } else setChoice({ remote, local });
-      setOpen(false);
+      setMode("closed");
+      setShare(false);
     } catch (e) {
       setMsg({ ok: false, text: `Não conectou: ${(e as Error).message}` });
     } finally {
       setBusy(false);
     }
   };
+
+  // ao abrir a carteira: conecta pelo link pessoal, se veio por ele; senão traz a planilha (ou envia o pendente)
+  useEffect(() => {
+    const link = takePendingLink();
+    const cur = getSheetsConfig();
+    if (link && !(cur && cur.url === link.url && cur.key === link.key)) {
+      void doConnect(link, "link");
+      return;
+    }
+    syncOnOpen()
+      .then((r) => r && r.skipped > 0 && setMsg({ ok: false, text: `${r.skipped} linhas da planilha foram ignoradas por estarem incompletas (papel, data, quantidade e preço são obrigatórios).` }))
+      .catch(() => undefined); // o estado já mostra o erro
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const syncNow = async () => {
     setMsg(null);
@@ -113,7 +150,10 @@ export function SheetsSync() {
 
   const field = "w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm";
 
-  if (cfg)
+  if (cfg) {
+    const link = personalLink(cfg);
+    const oldScript = (cfg.scriptVersion ?? 1) < 2;
+    const updatedCode = withKey(cfg.key);
     return (
       <Card className="mb-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
@@ -122,20 +162,23 @@ export function SheetsSync() {
             Google Planilhas
           </span>
           <span className={`min-w-0 flex-1 ${state.status === "error" ? "text-bad" : "text-ink-2"}`} role="status">
-            {state.status === "loading" && (
+            {(state.status === "loading" || busy) && (
               <>
                 <Spinner /> Lendo a planilha…
               </>
             )}
-            {state.status === "saving" && (
+            {state.status === "saving" && !busy && (
               <>
                 <Spinner /> Salvando na planilha…
               </>
             )}
-            {state.status === "ok" && `Sincronizado às ${time(state.at)}. Cada alteração é salva na planilha.`}
+            {state.status === "ok" && !busy && `Sincronizado às ${time(state.at)}. Cada alteração é salva na planilha.`}
             {state.status === "error" && state.message}
           </span>
           <span className="flex flex-wrap gap-2">
+            <Button variant={share ? "ghost" : "primary"} onClick={() => setShare((v) => !v)}>
+              {share ? "Fechar" : "Usar em outro navegador"}
+            </Button>
             {cfg.sheetUrl && (
               <a href={cfg.sheetUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-line px-3 py-1.5 font-medium hover:bg-surface-2">
                 Abrir planilha
@@ -151,7 +194,7 @@ export function SheetsSync() {
                   onClick={() => {
                     disconnect();
                     setConfirmOff(false);
-                    setMsg({ ok: true, text: "Desconectado. As operações continuam na planilha e neste navegador." });
+                    setMsg({ ok: true, text: "Desconectado neste navegador. As operações continuam na planilha; para voltar, use o seu link pessoal." });
                   }}
                 >
                   Desconectar
@@ -169,9 +212,54 @@ export function SheetsSync() {
         </div>
         {choice && <Choice choice={choice} onDone={(t) => (setChoice(null), setMsg({ ok: true, text: t }))} />}
         {msg && <Msg msg={msg} />}
-        <p className="border-t border-line px-4 py-2 text-xs text-ink-3">Para usar em outro aparelho, conecte com o mesmo endereço e a mesma chave. Você também pode editar a aba “Operações” direto na planilha.</p>
+        {share && (
+          <div className="grid grid-cols-1 gap-5 border-t border-line p-4 md:grid-cols-[auto_1fr]">
+            <div className="flex flex-col items-center gap-2">
+              <QrCode text={link} />
+              <span className="text-xs text-ink-3">Aponte a câmera do celular</span>
+            </div>
+            <div className="min-w-0 space-y-3 text-sm">
+              <p className="font-medium">Seu link pessoal</p>
+              <p ref={linkRef} className="num rounded-lg border border-line bg-bg px-3 py-2 text-xs break-all">
+                {link}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="primary" onClick={async () => (await copyText(link, linkRef.current)) && flash("link")}>
+                  {copied === "link" ? "Link copiado" : "Copiar link"}
+                </Button>
+              </div>
+              <ul className="list-disc space-y-1 pl-5 text-ink-2">
+                <li>Abra este link em qualquer navegador ou celular: a carteira já abre conectada, sem colar endereço nem chave.</li>
+                <li>Salve nos favoritos. Com a sincronização do Chrome, Edge ou Safari ligada, ele aparece nos seus outros aparelhos.</li>
+                <li>
+                  {oldScript ? "Depois de atualizar o script (abaixo), o" : "O"} link também fica na aba <strong>Calculadora</strong> da sua planilha, para você achar de qualquer lugar.
+                </li>
+                <li className="text-warn">Quem tiver este link acessa e altera suas operações. Não compartilhe.</li>
+              </ul>
+              {oldScript && (
+                <details className="rounded-lg border border-line p-3">
+                  <summary className="cursor-pointer font-medium">Atualizar o script para guardar o link na planilha (opcional)</summary>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-ink-2">
+                    <li>Na planilha, abra Extensões → Apps Script, apague o código e cole este (já com a sua chave).</li>
+                    <li>
+                      Clique em <strong>Implantar → Gerenciar implantações</strong>, no lápis, escolha <strong>Versão: Nova versão</strong> e Implantar. O endereço continua o mesmo.
+                    </li>
+                  </ol>
+                  <div className="mt-2 flex justify-end">
+                    <Button onClick={async () => (await copyText(updatedCode, codeRef.current)) && flash("code")}>{copied === "code" ? "Copiado" : "Copiar código"}</Button>
+                  </div>
+                  <pre ref={codeRef} className="mt-2 max-h-56 overflow-auto rounded-lg border border-line bg-bg p-3 text-[11px] leading-relaxed">
+                    {updatedCode}
+                  </pre>
+                </details>
+              )}
+            </div>
+          </div>
+        )}
+        <p className="border-t border-line px-4 py-2 text-xs text-ink-3">Você também pode editar a aba “Operações” direto na planilha; alterações dos dois lados são juntadas.</p>
       </Card>
     );
+  }
 
   return (
     <Card className="mb-5">
@@ -180,12 +268,56 @@ export function SheetsSync() {
           <p className="text-sm font-medium">Guardar a carteira no Google Planilhas</p>
           <p className="text-sm text-ink-2">Sem exportar e importar: cada alteração vai para uma planilha sua, e qualquer aparelho conectado lê de lá.</p>
         </div>
-        <Button variant={open ? "ghost" : "primary"} onClick={() => setOpen((v) => !v)}>
-          {open ? "Fechar" : "Conectar planilha"}
-        </Button>
+        <span className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => setMode((m) => (m === "existing" ? "closed" : "existing"))}>
+            {mode === "existing" ? "Fechar" : "Já tenho a planilha"}
+          </Button>
+          <Button onClick={() => setMode((m) => (m === "new" ? "closed" : "new"))}>{mode === "new" ? "Fechar" : "Criar planilha"}</Button>
+        </span>
       </div>
+      {busy && (
+        <p role="status" className="mx-4 mb-3 text-sm text-ink-2">
+          <Spinner /> Conectando…
+        </p>
+      )}
       {msg && <Msg msg={msg} />}
-      {open && (
+
+      {mode === "existing" && (
+        <div className="grid grid-cols-1 gap-5 border-t border-line p-4 lg:grid-cols-2">
+          <div className="min-w-0 space-y-2 text-sm">
+            <p className="font-medium">O jeito mais fácil: abra o seu link pessoal</p>
+            <ul className="list-disc space-y-1 pl-5 text-ink-2">
+              <li>
+                No navegador onde a carteira já está conectada: <strong>Minha carteira → Usar em outro navegador</strong>. Copie o link ou leia o QR code com o celular.
+              </li>
+              <li>
+                Ou abra a sua planilha no Google e clique no link da aba <strong>Calculadora</strong> (aparece depois que o script é atualizado para a versão 2).
+              </li>
+              <li>Se salvou o link nos favoritos, é só abrir.</li>
+            </ul>
+            <p className="text-xs text-ink-3">Não é preciso criar outra planilha nem colar o código de novo.</p>
+          </div>
+          <div className="min-w-0 space-y-2">
+            <p className="text-sm font-medium">Ou informe o endereço e a chave</p>
+            <label className="block text-xs text-ink-2">
+              Endereço do app da Web
+              <input id="sheets-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" className={`${field} mt-1`} autoComplete="off" />
+            </label>
+            <label className="block text-xs text-ink-2">
+              Chave
+              <input id="sheets-key" value={existingKey} onChange={(e) => setExistingKey(e.target.value)} placeholder='o texto entre aspas em var CHAVE = "…"' className={`${field} num mt-1`} autoComplete="off" />
+            </label>
+            <p className="text-xs text-ink-3">
+              A chave está na linha <code>var CHAVE</code> do código no Apps Script. O endereço fica em Implantar → Gerenciar implantações.
+            </p>
+            <Button variant="primary" onClick={() => doConnect({ url, key: existingKey }, "form")} disabled={busy || !url || !existingKey}>
+              Conectar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {mode === "new" && (
         <div className="grid grid-cols-1 gap-5 border-t border-line p-4 lg:grid-cols-2">
           <ol className="min-w-0 list-decimal space-y-3 pl-5 text-sm">
             <li>
@@ -208,25 +340,26 @@ export function SheetsSync() {
               <div className="grid gap-2">
                 <label className="text-xs text-ink-2">
                   Endereço do app da Web
-                  <input id="sheets-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" className={`${field} mt-1`} autoComplete="off" />
+                  <input id="sheets-new-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" className={`${field} mt-1`} autoComplete="off" />
                 </label>
                 <label className="text-xs text-ink-2">
                   Chave (a mesma do código)
-                  <input id="sheets-key" value={key} onChange={(e) => setKey(e.target.value)} className={`${field} num mt-1`} autoComplete="off" />
+                  <input id="sheets-new-key" value={key} onChange={(e) => setKey(e.target.value)} className={`${field} num mt-1`} autoComplete="off" />
                 </label>
                 <div>
-                  <Button variant="primary" onClick={doConnect} disabled={busy || !url}>
+                  <Button variant="primary" onClick={() => doConnect({ url, key }, "form")} disabled={busy || !url}>
                     {busy && <Spinner />}
                     Conectar e testar
                   </Button>
                 </div>
+                <p className="text-xs text-ink-3">Depois disso, nos outros navegadores use o link pessoal: não precisa repetir estes passos.</p>
               </div>
             </li>
           </ol>
           <div className="min-w-0">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-semibold tracking-wide text-ink-3 uppercase">Código para o Apps Script</span>
-              <Button onClick={copy}>{copied ? "Copiado" : "Copiar código"}</Button>
+              <Button onClick={async () => (await copyText(code, codeRef.current)) && flash("code")}>{copied === "code" ? "Copiado" : "Copiar código"}</Button>
             </div>
             <pre ref={codeRef} className="max-h-80 overflow-auto rounded-lg border border-line bg-bg p-3 text-[11px] leading-relaxed">
               {code}

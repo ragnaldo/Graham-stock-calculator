@@ -26,7 +26,9 @@ os dados embutidos.
 - **Google Planilhas**: em **Minha carteira → Conectar planilha**, a tela mostra o passo a passo e o código do
   script (`apps-script/Codigo.gs`, com a chave já preenchida). Depois de conectar, cada alteração vai para a aba
   "Operações" da sua planilha e qualquer aparelho conectado com o mesmo endereço e chave lê de lá. Dá para editar
-  as operações direto na planilha; alterações dos dois lados são juntadas.
+  as operações direto na planilha; alterações dos dois lados são juntadas. Para outros navegadores e celulares, use o
+  **link pessoal** (Minha carteira → Usar em outro navegador, com QR code) ou o link da aba "Calculadora" da planilha:
+  abre a carteira já conectada, sem colar endereço nem chave.
 - **Diversificação e balanceamento** (na carteira): nota de 0 a 100 com alertas (concentração por empresa e por grande
   setor, número efetivo de ativos, classes da mesma empresa, estatais, liquidez, papéis em alerta), quanto comprar de
   cada papel com o próximo aporte para chegar aos pesos-alvo (iguais ou atuais, com limites por empresa e por setor),
