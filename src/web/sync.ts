@@ -199,7 +199,7 @@ const now = () => new Date().toISOString();
  */
 async function save(cfg: SheetsConfig, list: Operation[]) {
   try {
-    await call(cfg, { chave: cfg.key, operacoes: list, link: personalLink(cfg) });
+    await call(cfg, { chave: cfg.key, operacoes: list });
   } catch (e) {
     const check = await call(cfg).catch(() => null);
     const stored = check ? fromSheet(check.operacoes ?? []).ops : null;

@@ -2,6 +2,7 @@
 // TypeScript puro: roda no navegador (app web) e no Node (testes e scripts).
 import { adjustPrices, buildAnnual, buildQuarters, buildTtm, splitFactorAfter, summarize, type AnnualRaw, type QuarterRaw, type Split } from "./history";
 import type { Benchmarks } from "./portfolio";
+import type { Vault } from "./vault";
 import type { DividendEvent, Snapshot, StockDetail, StockRow } from "./types";
 
 export interface Company {
@@ -61,6 +62,8 @@ export interface WebDataset {
   extras: Record<string, TickerExtra>;
   /** CDI e Ibovespa diários, para comparar a carteira. */
   benchmarks?: Benchmarks | null;
+  /** Endereço e chave da planilha, criptografados com a senha do dono. */
+  access?: Vault | null;
 }
 
 export interface TickerData {

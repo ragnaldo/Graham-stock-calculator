@@ -217,3 +217,6 @@ export function assetInfo(ticker: string): AssetInfo {
     alert,
   };
 }
+
+/** Acesso criptografado à planilha guardado no site (null se ainda não foi salvo). */
+export const getAccessVault = () => ds.access ?? null;

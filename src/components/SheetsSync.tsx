@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+
+declare const __REPO__: string;
+declare const __BRANCH__: string;
 import script from "../../apps-script/Codigo.gs";
 import type { Operation } from "@/core/portfolio";
 import { applyRemote, currentOperations, syncOnOpen, useSyncState } from "@/web/hooks";
-import qrcode from "qrcode-generator";
-import { connect, disconnect, getSheetsConfig, personalLink, pushNow, takePendingLink } from "@/web/sync";
+import { lockAccess, unlockAccess } from "@/core/vault";
+import { getAccessVault } from "@/web/data";
+import { connect, disconnect, getSheetsConfig, pushNow, takePendingLink } from "@/web/sync";
 import { Button, Card, Spinner } from "./ui";
 
 const randomKey = () => {
@@ -49,25 +53,6 @@ const withKey = (key: string) =>
     .replace(" *  1. Troque a CHAVE abaixo por uma senha só sua (ela vai no app junto com o endereço).", " *  1. A CHAVE abaixo já veio preenchida pela calculadora (é a mesma do app).")
     .replace('var CHAVE = "troque-esta-chave";', `var CHAVE = "${key.replace(/["\\]/g, "")}";`);
 
-/** QR code em SVG (desenhado aqui, sem depender de serviço externo). */
-function QrCode({ text, size = 176 }: { text: string; size?: number }) {
-  const path = useMemo(() => {
-    const qr = qrcode(0, "M");
-    qr.addData(text);
-    qr.make();
-    const n = qr.getModuleCount();
-    let d = "";
-    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + 2} ${r + 2}h1v1h-1z`;
-    return { d, n: n + 4 };
-  }, [text]);
-  return (
-    <svg viewBox={`0 0 ${path.n} ${path.n}`} width={size} height={size} role="img" aria-label="QR code do link pessoal" className="rounded-lg border border-line" shapeRendering="crispEdges">
-      <rect width={path.n} height={path.n} fill="#ffffff" />
-      <path d={path.d} fill="#000000" />
-    </svg>
-  );
-}
-
 /** Card de conexão com o Google Planilhas na tela da carteira. */
 export function SheetsSync() {
   const state = useSyncState();
@@ -89,9 +74,11 @@ export function SheetsSync() {
   const [choice, setChoice] = useState<{ remote: Operation[]; local: Operation[] } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
-  const [share, setShare] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [others, setOthers] = useState(false);
+  const vault = getAccessVault();
   const codeRef = useRef<HTMLPreElement>(null);
-  const linkRef = useRef<HTMLParagraphElement>(null);
   const code = useMemo(() => withKey(key), [key]);
 
   const flash = (what: string) => {
@@ -99,14 +86,14 @@ export function SheetsSync() {
     setTimeout(() => setCopied(null), 2500);
   };
 
-  const doConnect = async (target: { url: string; key: string }, via: "link" | "form") => {
+  const doConnect = async (target: { url: string; key: string }, via: "link" | "form" | "password") => {
     setBusy(true);
     setMsg(null);
     try {
       const { ops: remote, skipped } = await connect(target);
       const local = own(currentOperations());
       const note = skipped ? ` ${skipped} linhas incompletas da planilha foram ignoradas.` : "";
-      const intro = via === "link" ? "Conectado pelo seu link pessoal." : "Conectado.";
+      const intro = via === "link" ? "Conectado pelo seu link pessoal." : via === "password" ? "Senha aceita, carteira conectada." : "Conectado.";
       if (!remote.length) {
         if (local.length) await pushNow(local);
         else await pushNow([]); // grava o link pessoal na planilha (script versão 2)
@@ -116,7 +103,7 @@ export function SheetsSync() {
         setMsg({ ok: true, text: `${intro} ${remote.length} ${remote.length === 1 ? "operação carregada" : "operações carregadas"} da planilha.${note}` });
       } else setChoice({ remote, local });
       setMode("closed");
-      setShare(false);
+      setVaultOpen(false);
     } catch (e) {
       setMsg({ ok: false, text: `Não conectou: ${(e as Error).message}` });
     } finally {
@@ -138,6 +125,22 @@ export function SheetsSync() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const enter = async () => {
+    if (!vault) return;
+    setBusy(true);
+    setMsg(null);
+    let access;
+    try {
+      access = await unlockAccess(vault, password);
+    } catch (e) {
+      setBusy(false);
+      setMsg({ ok: false, text: (e as Error).message === "senha incorreta" ? "Senha incorreta." : `Não foi possível abrir o acesso: ${(e as Error).message}` });
+      return;
+    }
+    setPassword("");
+    await doConnect(access, "password");
+  };
+
   const syncNow = async () => {
     setMsg(null);
     try {
@@ -151,9 +154,6 @@ export function SheetsSync() {
   const field = "w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm";
 
   if (cfg) {
-    const link = personalLink(cfg);
-    const oldScript = (cfg.scriptVersion ?? 1) < 2;
-    const updatedCode = withKey(cfg.key);
     return (
       <Card className="mb-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
@@ -176,8 +176,8 @@ export function SheetsSync() {
             {state.status === "error" && state.message}
           </span>
           <span className="flex flex-wrap gap-2">
-            <Button variant={share ? "ghost" : "primary"} onClick={() => setShare((v) => !v)}>
-              {share ? "Fechar" : "Usar em outro navegador"}
+            <Button variant={vaultOpen ? "ghost" : "primary"} onClick={() => setVaultOpen((v) => !v)}>
+              {vaultOpen ? "Fechar" : "Senha de acesso"}
             </Button>
             {cfg.sheetUrl && (
               <a href={cfg.sheetUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-line px-3 py-1.5 font-medium hover:bg-surface-2">
@@ -194,10 +194,10 @@ export function SheetsSync() {
                   onClick={() => {
                     disconnect();
                     setConfirmOff(false);
-                    setMsg({ ok: true, text: "Desconectado neste navegador. As operações continuam na planilha; para voltar, use o seu link pessoal." });
+                    setMsg({ ok: true, text: vault ? "Você saiu deste navegador. As operações continuam na planilha; para voltar, digite a senha." : "Desconectado neste navegador. As operações continuam na planilha." });
                   }}
                 >
-                  Desconectar
+                  Sair deste navegador
                 </Button>
                 <Button variant="ghost" onClick={() => setConfirmOff(false)}>
                   Cancelar
@@ -205,61 +205,51 @@ export function SheetsSync() {
               </>
             ) : (
               <Button variant="ghost" onClick={() => setConfirmOff(true)}>
-                Desconectar
+                Sair
               </Button>
             )}
           </span>
         </div>
         {choice && <Choice choice={choice} onDone={(t) => (setChoice(null), setMsg({ ok: true, text: t }))} />}
         {msg && <Msg msg={msg} />}
-        {share && (
-          <div className="grid grid-cols-1 gap-5 border-t border-line p-4 md:grid-cols-[auto_1fr]">
-            <div className="flex flex-col items-center gap-2">
-              <QrCode text={link} />
-              <span className="text-xs text-ink-3">Aponte a câmera do celular</span>
-            </div>
-            <div className="min-w-0 space-y-3 text-sm">
-              <p className="font-medium">Seu link pessoal</p>
-              <p ref={linkRef} className="num rounded-lg border border-line bg-bg px-3 py-2 text-xs break-all">
-                {link}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="primary" onClick={async () => (await copyText(link, linkRef.current)) && flash("link")}>
-                  {copied === "link" ? "Link copiado" : "Copiar link"}
-                </Button>
-              </div>
-              <ul className="list-disc space-y-1 pl-5 text-ink-2">
-                <li>Abra este link em qualquer navegador ou celular: a carteira já abre conectada, sem colar endereço nem chave.</li>
-                <li>Salve nos favoritos. Com a sincronização do Chrome, Edge ou Safari ligada, ele aparece nos seus outros aparelhos.</li>
-                <li>
-                  {oldScript ? "Depois de atualizar o script (abaixo), o" : "O"} link também fica na aba <strong>Calculadora</strong> da sua planilha, para você achar de qualquer lugar.
-                </li>
-                <li className="text-warn">Quem tiver este link acessa e altera suas operações. Não compartilhe.</li>
-              </ul>
-              {oldScript && (
-                <details className="rounded-lg border border-line p-3">
-                  <summary className="cursor-pointer font-medium">Atualizar o script para guardar o link na planilha (opcional)</summary>
-                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-ink-2">
-                    <li>Na planilha, abra Extensões → Apps Script, apague o código e cole este (já com a sua chave).</li>
-                    <li>
-                      Clique em <strong>Implantar → Gerenciar implantações</strong>, no lápis, escolha <strong>Versão: Nova versão</strong> e Implantar. O endereço continua o mesmo.
-                    </li>
-                  </ol>
-                  <div className="mt-2 flex justify-end">
-                    <Button onClick={async () => (await copyText(updatedCode, codeRef.current)) && flash("code")}>{copied === "code" ? "Copiado" : "Copiar código"}</Button>
-                  </div>
-                  <pre ref={codeRef} className="mt-2 max-h-56 overflow-auto rounded-lg border border-line bg-bg p-3 text-[11px] leading-relaxed">
-                    {updatedCode}
-                  </pre>
-                </details>
-              )}
-            </div>
-          </div>
-        )}
+        {vaultOpen && <VaultPanel access={{ url: cfg.url, key: cfg.key }} hasVault={!!vault} />}
         <p className="border-t border-line px-4 py-2 text-xs text-ink-3">Você também pode editar a aba “Operações” direto na planilha; alterações dos dois lados são juntadas.</p>
       </Card>
     );
   }
+
+  if (vault && !others)
+    return (
+      <Card className="mb-5">
+        <form
+          className="flex flex-wrap items-end gap-3 px-4 py-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void enter();
+          }}
+        >
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-sm font-medium">Sua carteira está no Google Planilhas</p>
+            <p className="text-sm text-ink-2">Digite a senha para abrir. Este navegador fica conectado até você sair.</p>
+          </div>
+          <label className="text-xs text-ink-2">
+            Senha
+            <input id="vault-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={`${field} mt-1 w-56`} />
+          </label>
+          <Button type="submit" variant="primary" disabled={busy || !password}>
+            {busy && <Spinner />}
+            Entrar
+          </Button>
+        </form>
+        {msg && <Msg msg={msg} />}
+        <p className="border-t border-line px-4 py-2 text-xs text-ink-3">
+          <button type="button" className="underline" onClick={() => setOthers(true)}>
+            Outras formas de conectar
+          </button>{" "}
+          (endereço e chave, ou criar outra planilha)
+        </p>
+      </Card>
+    );
 
   return (
     <Card className="mb-5">
@@ -372,6 +362,116 @@ export function SheetsSync() {
         </div>
       )}
     </Card>
+  );
+}
+
+/** Gera o acesso criptografado com a senha escolhida e mostra como salvá-lo no site. */
+function VaultPanel({ access, hasVault }: { access: { url: string; key: string }; hasVault: boolean }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLPreElement>(null);
+  const field = "w-full rounded-lg border border-line bg-bg px-3 py-1.5 text-sm";
+  const weak = pw.length > 0 && (pw.length < 10 || !/[^a-z0-9]/i.test(pw) || /^[a-z]+\d+$/i.test(pw));
+
+  const generate = async () => {
+    setError(null);
+    if (pw !== pw2) return setError("As duas senhas não conferem.");
+    setBusy(true);
+    try {
+      const v = await lockAccess(access, pw);
+      await unlockAccess(v, pw); // confere antes de mostrar
+      setCode(JSON.stringify(v, null, 2));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const file = "data/acesso.json";
+  const github = code
+    ? hasVault
+      ? `https://github.com/${__REPO__}/edit/${__BRANCH__}/${file}`
+      : `https://github.com/${__REPO__}/new/${__BRANCH__}?filename=${encodeURIComponent(file)}&value=${encodeURIComponent(code)}`
+    : "";
+
+  return (
+    <div className="grid grid-cols-1 gap-5 border-t border-line p-4 lg:grid-cols-2">
+      <div className="min-w-0 space-y-3 text-sm">
+        <p className="font-medium">{hasVault ? "Trocar a senha de acesso" : "Guardar o acesso no site, com senha"}</p>
+        <p className="text-ink-2">
+          {hasVault
+            ? "O site já guarda o acesso à sua planilha. Para trocar a senha, gere um código novo e substitua o arquivo no GitHub."
+            : "Nos outros navegadores e no celular, basta digitar a senha: o endereço da planilha e a chave ficam guardados no site, criptografados com ela."}
+        </p>
+        <label className="block text-xs text-ink-2">
+          Senha
+          <input id="vault-new" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} className={`${field} mt-1`} />
+        </label>
+        <label className="block text-xs text-ink-2">
+          Repita a senha
+          <input id="vault-new2" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} className={`${field} mt-1`} />
+        </label>
+        {weak && <p className="text-xs text-warn">Senha fraca: o código fica público no site e uma senha curta ou previsível pode ser descoberta. Prefira 12+ caracteres com símbolos.</p>}
+        {error && (
+          <p role="alert" className="text-sm text-bad">
+            {error}
+          </p>
+        )}
+        <Button variant="primary" onClick={generate} disabled={busy || !pw || !pw2}>
+          {busy && <Spinner />}
+          Gerar acesso
+        </Button>
+        <p className="text-xs text-ink-3">A senha não fica guardada em lugar nenhum. Se esquecer, gere de novo aqui, num navegador conectado.</p>
+      </div>
+      <div className="min-w-0 space-y-3 text-sm">
+        {code ? (
+          <>
+            <p className="font-medium">Salve no site (uma vez)</p>
+            <ol className="list-decimal space-y-1 pl-5 text-ink-2">
+              {hasVault ? (
+                <>
+                  <li>Copie o código abaixo.</li>
+                  <li>
+                    Abra o arquivo no GitHub, apague o conteúdo, cole o código e clique em <strong>Commit changes</strong>.
+                  </li>
+                </>
+              ) : (
+                <li>
+                  Abra o GitHub pelo botão abaixo (o arquivo já vem preenchido) e clique em <strong>Commit changes</strong>.
+                </li>
+              )}
+              <li>Em uns 5 minutos o site se atualiza sozinho. Daí em diante, qualquer navegador abre a carteira com a senha.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              <a href={github} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg bg-ink px-3 py-1.5 text-sm font-medium text-surface hover:opacity-90">
+                {hasVault ? "Abrir o arquivo no GitHub" : "Salvar no GitHub"}
+              </a>
+              <Button
+                onClick={async () => {
+                  if (await copyText(code, ref.current)) {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2500);
+                  }
+                }}
+              >
+                {copied ? "Copiado" : "Copiar código"}
+              </Button>
+            </div>
+            <pre ref={ref} className="max-h-48 overflow-auto rounded-lg border border-line bg-bg p-3 text-[11px] leading-relaxed">
+              {code}
+            </pre>
+            <p className="text-xs text-ink-3">Este código pode ficar público: sem a senha ele não abre. Se preferir, mande-o para quem cuida do site salvar.</p>
+          </>
+        ) : (
+          <p className="text-ink-3">Depois de gerar, aparece aqui o código e o botão para salvar no GitHub.</p>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -12,6 +12,7 @@ import { build } from "esbuild";
 import type { Company, PriceSeries, WebDataset } from "../src/core/dataset";
 import type { AnnualRaw, QuarterRaw } from "../src/core/history";
 import type { Benchmarks } from "../src/core/portfolio";
+import { isVault, type Vault } from "../src/core/vault";
 import type { SnapshotFile } from "./update-quotes";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -34,6 +35,10 @@ function dataset(): WebDataset {
   const prices = read<Record<string, PriceSeries>>("prices.json");
   const quarters = read<Record<string, QuarterRaw[]>>("quarters.json");
   const benchmarks = existsSync(path.join(DATA, "benchmarks.json")) ? read<Benchmarks>("benchmarks.json") : null;
+  // acesso à planilha, criptografado com a senha do dono (gerado em Minha carteira → Senha de acesso)
+  const accessFile = process.env.ACCESS_FILE ?? path.join(DATA, "acesso.json");
+  const access = existsSync(accessFile) ? (JSON.parse(readFileSync(accessFile, "utf8")) as unknown) : null;
+  if (access !== null && !isVault(access)) throw new Error(`${path.relative(ROOT, accessFile)} não é um acesso criptografado válido`);
   const meta = read<{ updatedAt?: string; lastFiscalYear?: number }>("meta.json");
 
   // só o que a interface usa: papéis da lista e empresas com algum desses papéis
@@ -66,6 +71,7 @@ function dataset(): WebDataset {
     prices: usedPrices,
     extras: snap.extras,
     benchmarks,
+    access: access as Vault | null,
   };
 }
 
@@ -86,7 +92,12 @@ async function main() {
     jsx: "automatic",
     write: false,
     legalComments: "none",
-    define: { "process.env.NODE_ENV": '"production"', __DATA_URL__: JSON.stringify(DATA_URL) },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      __DATA_URL__: JSON.stringify(DATA_URL),
+      __REPO__: JSON.stringify(process.env.GITHUB_REPOSITORY ?? "ragnaldo/Graham-stock-calculator"),
+      __BRANCH__: JSON.stringify(process.env.PAGES_BRANCH ?? "claude/lucid-babbage-5ji5cf"),
+    },
     alias: { "@": path.join(ROOT, "src") },
     loader: { ".gs": "text" },
     logLevel: "warning",
